@@ -91,6 +91,10 @@ These are derived from `CURRENT_STATE_AND_REQUIREMENTS.md` (the source of truth)
 - `Finalized_System_Architecture.md` — Final architecture post one-month review
 - `Perfectionism_Protocols.md` — Recovery protocols for comparison anxiety and all-or-nothing collapse
 
+## Work Log Convention
+
+After completing a feature or meaningful change, always add a numbered `.md` file to `docs/work-log/` (e.g., `002-feature-name.md`). These explain what was done, why, and teach relevant software development concepts. The audience is a data scientist (Python/R/SQL background) learning web development via vibe coding — keep explanations concise and practical.
+
 ## Known Issues / Tech Debt
 
 - `useAIBriefing.ts` contains extensive debug logging (`#region agent log` blocks posting to `127.0.0.1:7242`) that should be removed for production
