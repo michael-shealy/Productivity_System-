@@ -35,12 +35,6 @@ export type AIBriefingResponse = {
   insights: AIInsightCard[];
 };
 
-export type AIBriefingCache = {
-  date: string;
-  timestamp: number;
-  data: AIBriefingResponse;
-};
-
 // ── Context Builder ────────────────────────────────────────────────────
 
 export function buildBriefingContext(opts: {
@@ -110,41 +104,3 @@ export function buildBriefingContext(opts: {
   };
 }
 
-// ── Cache Helpers ──────────────────────────────────────────────────────
-
-const CACHE_KEY = "ai_briefing_cache";
-const CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
-
-export function getCachedBriefing(todayKey: string): AIBriefingResponse | null {
-  try {
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
-    const cached: AIBriefingCache = JSON.parse(raw);
-    if (cached.date !== todayKey) return null;
-    if (Date.now() - cached.timestamp > CACHE_TTL_MS) return null;
-    return cached.data;
-  } catch {
-    return null;
-  }
-}
-
-export function setCachedBriefing(todayKey: string, data: AIBriefingResponse) {
-  try {
-    const entry: AIBriefingCache = {
-      date: todayKey,
-      timestamp: Date.now(),
-      data,
-    };
-    localStorage.setItem(CACHE_KEY, JSON.stringify(entry));
-  } catch {
-    // localStorage full or unavailable — silently ignore
-  }
-}
-
-export function clearBriefingCache() {
-  try {
-    localStorage.removeItem(CACHE_KEY);
-  } catch {
-    // ignore
-  }
-}

@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 import { normalizeGoogleEvent } from "@/lib/contracts";
+import { getRouteUser } from "@/lib/supabase/route";
+import { getOAuthToken } from "@/lib/supabase/tokens";
 
-function getCookieValue(cookieHeader: string | null, name: string) {
-  return cookieHeader?.match(new RegExp(`${name}=([^;]+)`))?.[1];
+async function getGoogleToken() {
+  const { supabase, user } = await getRouteUser();
+  if (!user) return null;
+  const result = await getOAuthToken(supabase, user.id, "google");
+  return result?.access_token ?? null;
 }
 
 export async function GET(request: Request) {
-  const token = getCookieValue(request.headers.get("cookie"), "google_access_token");
+  const token = await getGoogleToken();
   if (!token) {
     return NextResponse.json({ error: "Missing Google token" }, { status: 401 });
   }
@@ -52,7 +57,9 @@ export async function GET(request: Request) {
       const data = (await apiResponse.json()) as {
         items?: Array<Record<string, unknown>>;
       };
-      return { calendarId, items: data.items ?? [] };
+      const items = data.items ?? [];
+
+      return { calendarId, items };
     })
   );
 
@@ -64,7 +71,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const token = getCookieValue(request.headers.get("cookie"), "google_access_token");
+  const token = await getGoogleToken();
   if (!token) {
     return NextResponse.json({ error: "Missing Google token" }, { status: 401 });
   }
@@ -125,7 +132,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const token = getCookieValue(request.headers.get("cookie"), "google_access_token");
+  const token = await getGoogleToken();
   if (!token) {
     return NextResponse.json({ error: "Missing Google token" }, { status: 401 });
   }
@@ -186,7 +193,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const token = getCookieValue(request.headers.get("cookie"), "google_access_token");
+  const token = await getGoogleToken();
   if (!token) {
     return NextResponse.json({ error: "Missing Google token" }, { status: 401 });
   }

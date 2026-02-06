@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getRouteUser } from "@/lib/supabase/route";
 
 function getEnv(name: string) {
   const value = process.env[name];
@@ -9,6 +10,11 @@ function getEnv(name: string) {
 }
 
 export async function GET() {
+  const { user } = await getRouteUser();
+  if (!user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
   const clientId = getEnv("GOOGLE_CLIENT_ID");
   const redirectUri = getEnv("GOOGLE_REDIRECT_URI");
   const state = crypto.randomUUID();
