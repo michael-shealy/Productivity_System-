@@ -1,0 +1,221 @@
+import { NextResponse } from "next/server";
+import Anthropic from "@anthropic-ai/sdk";
+import type { AIBriefingRequest, AIBriefingResponse, AIInsightCard } from "@/lib/ai";
+
+const SYSTEM_PROMPT = `You are a calm, identity-focused daily coach embedded in a personal productivity system.
+
+Your tone rules:
+- Never shame, guilt, or use deficit language ("you failed", "you didn't", "you're behind").
+- Use language of invitation, observation, and gentle encouragement.
+- Frame everything through identity ("the person you are becoming") rather than output metrics.
+- Be concise — headline ≤ 2 sentences, valuesFocus ≤ 1 sentence, each whyBullet ≤ 1 sentence.
+- Every suggestion must cite at least one piece of data from the context (a streak, a task, a habit stat, an event).
+
+Output ONLY valid JSON matching this exact structure (no markdown fences, no extra text):
+{
+  "headline": "A 1-2 sentence personalized morning briefing based on today's context.",
+  "valuesFocus": "A short values-focus phrase for the day (e.g. 'Values focus: presence, grounded confidence, curiosity').",
+  "whyBullets": [
+    "Reason 1 citing specific data.",
+    "Reason 2 citing specific data.",
+    "Reason 3 citing specific data."
+  ],
+  "insights": [
+    {
+      "title": "Short insight title",
+      "body": "1-2 sentence actionable suggestion.",
+      "why": ["Data-backed reason for this insight."]
+    }
+  ]
+}
+
+Rules for insights array:
+- Generate 2-4 insight cards.
+- Each must have a "why" array with 1-2 reasons grounded in the provided data.
+- Prioritize identity practices, habit streaks worth protecting, and today's schedule constraints.
+- Never generate more than 4 insights.`;
+
+function buildUserPrompt(ctx: AIBriefingRequest): string {
+  const sections: string[] = [];
+
+  sections.push(`Today: ${ctx.today}`);
+  sections.push(`Morning flow status: ${ctx.morningFlowStatus}`);
+  sections.push(`Identity score: ${ctx.identityScore}/5`);
+
+  if (ctx.goals.length > 0) {
+    sections.push(
+      `Active goals:\n${ctx.goals.map((g) => `- ${g.title} (${g.domain}, ${g.season})`).join("\n")}`
+    );
+  }
+
+  if (ctx.tasks.length > 0) {
+    sections.push(
+      `Tasks due today (${ctx.tasks.length}):\n${ctx.tasks.map((t) => `- [P${t.priority}] ${t.title}${t.due ? ` (due ${t.due})` : ""}`).join("\n")}`
+    );
+  } else {
+    sections.push("Tasks due today: none");
+  }
+
+  if (ctx.completedTasks.length > 0) {
+    sections.push(
+      `Already completed today (${ctx.completedTasks.length}):\n${ctx.completedTasks.map((t) => `- ${t.title}`).join("\n")}`
+    );
+  }
+
+  if (ctx.events.length > 0) {
+    sections.push(
+      `Calendar events today (${ctx.events.length}):\n${ctx.events.map((e) => `- ${e.time}: ${e.title}`).join("\n")}`
+    );
+  } else {
+    sections.push("Calendar events today: none");
+  }
+
+  if (ctx.habitStats.length > 0) {
+    sections.push(
+      `Top habit streaks:\n${ctx.habitStats.map((h) => `- ${h.title}: ${h.activeStreak}-day streak, ${h.adherencePercent}% adherence, ${h.last7Sum} in last 7 days`).join("\n")}`
+    );
+  }
+
+  if (ctx.focusThemes.length > 0) {
+    sections.push(`Detected focus themes: ${ctx.focusThemes.join(", ")}`);
+  }
+
+  if (ctx.focus3.length > 0) {
+    sections.push(
+      `Focus 3 for today:\n${ctx.focus3.map((f) => `- ${f.label} (${f.type})`).join("\n")}`
+    );
+  }
+
+  return sections.join("\n\n");
+}
+
+function parseResponse(text: string): AIBriefingResponse {
+  // Try direct JSON parse first
+  try {
+    const parsed = JSON.parse(text);
+    return validateResponse(parsed);
+  } catch {
+    // Fallback: extract JSON from markdown fences
+    const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    if (fenceMatch) {
+      const parsed = JSON.parse(fenceMatch[1]);
+      return validateResponse(parsed);
+    }
+    throw new Error("Could not parse AI response as JSON");
+  }
+}
+
+function validateResponse(obj: Record<string, unknown>): AIBriefingResponse {
+  const headline = typeof obj.headline === "string" ? obj.headline : "";
+  const valuesFocus = typeof obj.valuesFocus === "string" ? obj.valuesFocus : "";
+  const whyBullets = Array.isArray(obj.whyBullets)
+    ? (obj.whyBullets as string[]).filter((b) => typeof b === "string").slice(0, 5)
+    : [];
+  const insights = Array.isArray(obj.insights)
+    ? (obj.insights as Array<Record<string, unknown>>)
+        .filter(
+          (i) =>
+            typeof i.title === "string" &&
+            typeof i.body === "string" &&
+            Array.isArray(i.why)
+        )
+        .slice(0, 4)
+        .map(
+          (i, idx): AIInsightCard => ({
+            id: `ai-insight-${idx}`,
+            title: i.title as string,
+            body: i.body as string,
+            why: (i.why as string[]).filter((w) => typeof w === "string").slice(0, 3),
+          })
+        )
+    : [];
+
+  return { headline, valuesFocus, whyBullets, insights };
+}
+
+export async function POST(request: Request) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    // #region agent log
+    void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "debug-session",
+        runId: "pre-fix",
+        hypothesisId: "H7",
+        location: "api/ai/briefing/route.ts:POST.missingKey",
+        message: "ANTHROPIC_API_KEY missing on server",
+        data: {},
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
+    return NextResponse.json(
+      { error: "ANTHROPIC_API_KEY not configured" },
+      { status: 503 }
+    );
+  }
+
+  let ctx: AIBriefingRequest;
+  try {
+    ctx = (await request.json()) as AIBriefingRequest;
+  } catch {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  }
+
+  const client = new Anthropic({ apiKey });
+
+  try {
+    const message = await client.messages.create({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 1024,
+      system: SYSTEM_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: buildUserPrompt(ctx),
+        },
+      ],
+    });
+
+    const textBlock = message.content.find((block) => block.type === "text");
+    if (!textBlock || textBlock.type !== "text") {
+      return NextResponse.json(
+        { error: "No text in AI response" },
+        { status: 502 }
+      );
+    }
+
+    const briefing = parseResponse(textBlock.text);
+    return NextResponse.json(briefing);
+  } catch (error) {
+    console.error("AI briefing generation failed", error);
+    const detail = error instanceof Error ? error.message : "Unknown error";
+
+    // #region agent log
+    void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "debug-session",
+        runId: "pre-fix",
+        hypothesisId: "H8",
+        location: "api/ai/briefing/route.ts:POST.catch",
+        message: "AI briefing generation failed in route",
+        data: {
+          detail,
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
+    return NextResponse.json(
+      { error: "AI briefing generation failed", detail },
+      { status: 502 }
+    );
+  }
+}

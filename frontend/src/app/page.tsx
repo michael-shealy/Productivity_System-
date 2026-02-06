@@ -8,6 +8,9 @@ import {
   loadHabitsFromStorage,
   saveHabitsToStorage,
 } from "@/lib/habitStore";
+import { buildBriefingContext } from "@/lib/ai";
+import { activeGoals } from "@/lib/goals";
+import { useAIBriefing } from "@/lib/useAIBriefing";
 
 export default function Home() {
   const [todoistTasks, setTodoistTasks] = useState<TaskContract[]>([]);
@@ -1476,6 +1479,34 @@ export default function Home() {
     };
   }, [habitStats]);
 
+  const aiBriefingContext = useMemo(() => {
+    if (!habitStats.length && !dueTodayTasks.length && !todayAgendaEvents.length) {
+      return null;
+    }
+    return buildBriefingContext({
+      goals: activeGoals(),
+      dueTodayTasks,
+      completedTodayTasks,
+      todayAgendaEvents,
+      habitStats,
+      identityScore,
+      focusThemes,
+      focus3Snapshot,
+      morningFlowStatus,
+    });
+  }, [
+    habitStats,
+    dueTodayTasks,
+    completedTodayTasks,
+    todayAgendaEvents,
+    identityScore,
+    focusThemes,
+    focus3Snapshot,
+    morningFlowStatus,
+  ]);
+
+  const aiBriefing = useAIBriefing(aiBriefingContext);
+
   const morningFlowStepCount = Object.values(morningFlowSteps).filter(Boolean).length;
   const morningFlowTotalSteps = Object.keys(morningFlowSteps).length;
   const morningFlowComplete = morningFlowStepCount === morningFlowTotalSteps;
@@ -1961,29 +1992,58 @@ export default function Home() {
                 id="morning-briefing"
                 className="rounded-2xl border border-indigo-900/50 bg-zinc-900/80 p-5 shadow-sm backdrop-blur"
               >
-                <h2 className="text-lg font-semibold">Morning Briefing</h2>
-                <p className="mt-2 text-sm text-zinc-300">
-                  {hasTodoist || hasCalendar ? briefingCopy : briefingCopy}
-                </p>
-                <div className="mt-4 rounded-xl bg-indigo-500/10 px-4 py-3 text-sm text-indigo-200">
-                  Values focus: presence, grounded confidence, relationship care.
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-lg font-semibold">Morning Briefing</h2>
+                  <div className="flex items-center gap-2">
+                    {aiBriefing.briefing && (
+                      <button
+                        type="button"
+                        onClick={aiBriefing.refresh}
+                        disabled={aiBriefing.loading}
+                        className="rounded-full border border-indigo-700/60 px-3 py-1 text-xs text-indigo-200 hover:text-white disabled:opacity-50"
+                      >
+                        {aiBriefing.loading ? "Generating..." : "Refresh"}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="mt-3 rounded-xl border border-indigo-900/50 bg-zinc-950/40 px-4 py-3 text-xs text-zinc-300">
-                  <p className="font-semibold text-indigo-200">Why this briefing</p>
-                  <ul className="mt-2 space-y-1">
-                    <li>
-                      {dueTodayTasks.length} tasks are due today tied to your operational
-                      commitments.
-                    </li>
-                    <li>
-                      {todayAgendaEvents.length} events shape the day’s constraints and
-                      themes.
-                    </li>
-                    <li>
-                      Primary focus areas are prioritized over productivity volume.
-                    </li>
-                  </ul>
-                </div>
+                {aiBriefing.loading && !aiBriefing.briefing ? (
+                  <div className="mt-3 space-y-3 animate-pulse">
+                    <div className="h-4 w-3/4 rounded bg-indigo-500/20" />
+                    <div className="h-4 w-1/2 rounded bg-indigo-500/20" />
+                    <div className="h-10 rounded-xl bg-indigo-500/10" />
+                    <div className="h-16 rounded-xl bg-zinc-950/40" />
+                  </div>
+                ) : (
+                  <>
+                    <p className="mt-2 text-sm text-zinc-300">
+                      {aiBriefing.briefing?.headline ?? briefingCopy}
+                    </p>
+                    <div className="mt-4 rounded-xl bg-indigo-500/10 px-4 py-3 text-sm text-indigo-200">
+                      {aiBriefing.briefing?.valuesFocus ??
+                        "Values focus: presence, grounded confidence, relationship care."}
+                    </div>
+                    <div className="mt-3 rounded-xl border border-indigo-900/50 bg-zinc-950/40 px-4 py-3 text-xs text-zinc-300">
+                      <p className="font-semibold text-indigo-200">Why this briefing</p>
+                      <ul className="mt-2 space-y-1">
+                        {(
+                          aiBriefing.briefing?.whyBullets ?? [
+                            `${dueTodayTasks.length} tasks are due today tied to your operational commitments.`,
+                            `${todayAgendaEvents.length} events shape the day\u2019s constraints and themes.`,
+                            "Primary focus areas are prioritized over productivity volume.",
+                          ]
+                        ).map((bullet, i) => (
+                          <li key={`why-${i}`}>{bullet}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    {aiBriefing.error && (
+                      <div className="mt-3 rounded-xl border border-amber-900/50 bg-amber-500/10 px-4 py-2 text-xs text-amber-200">
+                        AI briefing unavailable — showing default view. ({aiBriefing.error})
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
               <div
                 id="focus-3"
@@ -2111,16 +2171,20 @@ export default function Home() {
                 </p>
               </div>
               <span className="rounded-full border border-indigo-900/50 bg-indigo-500/10 px-3 py-1 text-xs text-indigo-200">
-                Explainable only
+                {aiBriefing.briefing?.insights ? "AI-assisted" : "Explainable only"}
               </span>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {practiceInsights.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-indigo-900/60 bg-zinc-950/40 px-3 py-3 text-sm text-zinc-400">
-                  No insights yet. Add a few check-ins to activate suggestions.
-                </div>
-              ) : (
-                practiceInsights.map((insight) => (
+              {(() => {
+                const displayInsights = aiBriefing.briefing?.insights ?? practiceInsights;
+                if (displayInsights.length === 0) {
+                  return (
+                    <div className="rounded-xl border border-dashed border-indigo-900/60 bg-zinc-950/40 px-3 py-3 text-sm text-zinc-400">
+                      No insights yet. Add a few check-ins to activate suggestions.
+                    </div>
+                  );
+                }
+                return displayInsights.map((insight) => (
                   <div
                     key={insight.id}
                     className="rounded-xl border border-indigo-900/50 bg-indigo-500/10 px-3 py-3 text-sm text-indigo-100"
@@ -2136,8 +2200,8 @@ export default function Home() {
                       </ul>
                     </div>
                   </div>
-                ))
-              )}
+                ));
+              })()}
             </div>
           </section>
 
