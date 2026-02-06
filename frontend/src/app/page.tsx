@@ -31,12 +31,21 @@ export default function Home() {
   const [habitDetailView, setHabitDetailView] = useState<
     "day" | "week" | "month" | "year"
   >("week");
+  const [habitMonthFocusByHabit, setHabitMonthFocusByHabit] = useState<
+    Record<string, string | null>
+  >({});
   const [habitSeriesPageByHabit, setHabitSeriesPageByHabit] = useState<
     Record<string, number>
   >({});
   const [morningFlowStatus, setMorningFlowStatus] = useState<
     "idle" | "in_progress" | "complete"
   >("idle");
+  const [morningFlowSteps, setMorningFlowSteps] = useState({
+    briefing: false,
+    focus: false,
+    identity: false,
+    habits: false,
+  });
   const [calendarEvents, setCalendarEvents] = useState<CalendarEventContract[]>(
     []
   );
@@ -65,6 +74,9 @@ export default function Home() {
     Array<{ id: string; label: string; type: string }>
   >([]);
   const [focus3SnapshotDate, setFocus3SnapshotDate] = useState("");
+  const [focus3Editing, setFocus3Editing] = useState(false);
+  const [focus3Draft, setFocus3Draft] = useState<Array<{ label: string; type: string }>>([]);
+  const [focus3OverrideDate, setFocus3OverrideDate] = useState<string | null>(null);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [taskEditForm, setTaskEditForm] = useState({
     content: "",
@@ -479,6 +491,9 @@ export default function Home() {
     const uniqueCandidateCount = new Set(
       focusCandidates.map((item) => item.label.toLowerCase())
     ).size;
+    if (focus3OverrideDate === todayKey) {
+      return;
+    }
     const shouldRefresh =
       focus3SnapshotDate !== todayKey ||
       (!hasRealFocus && focusCandidates.length > 0) ||
@@ -488,7 +503,7 @@ export default function Home() {
       setFocus3SnapshotDate(todayKey);
       setFocus3Snapshot(selectFocus3());
     }
-  }, [focusCandidates, focus3Snapshot, focus3SnapshotDate, todayKey]);
+  }, [focusCandidates, focus3OverrideDate, focus3Snapshot, focus3SnapshotDate, todayKey]);
 
   const focusThemes = focusAreas
     .filter((area) => (focusAreaCounts[area.id] ?? 0) > 0)
@@ -734,11 +749,35 @@ export default function Home() {
   }, [todayKey]);
 
   useEffect(() => {
+    const cached = localStorage.getItem("morningFlowSteps");
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as {
+          date: string;
+          steps: typeof morningFlowSteps;
+        };
+        if (parsed.date === todayKey && parsed.steps) {
+          setMorningFlowSteps(parsed.steps);
+        }
+      } catch {
+        localStorage.removeItem("morningFlowSteps");
+      }
+    }
+  }, [todayKey]);
+
+  useEffect(() => {
     localStorage.setItem(
       "morningFlowStatus",
       JSON.stringify({ date: todayKey, status: morningFlowStatus })
     );
   }, [morningFlowStatus, todayKey]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "morningFlowSteps",
+      JSON.stringify({ date: todayKey, steps: morningFlowSteps })
+    );
+  }, [morningFlowSteps, todayKey]);
 
   useEffect(() => {
     const cached = localStorage.getItem("identityCheck");
@@ -754,6 +793,23 @@ export default function Home() {
       } catch {
         localStorage.removeItem("identityCheck");
       }
+    }
+  }, [todayKey]);
+
+  useEffect(() => {
+    const cached = localStorage.getItem("focus3Override");
+    if (!cached) return;
+    try {
+      const parsed = JSON.parse(cached) as {
+        date: string;
+        items: Array<{ id: string; label: string; type: string }>;
+      };
+      if (parsed.date === todayKey && parsed.items?.length) {
+        setFocus3Snapshot(parsed.items);
+        setFocus3OverrideDate(parsed.date);
+      }
+    } catch {
+      localStorage.removeItem("focus3Override");
     }
   }, [todayKey]);
 
@@ -1389,7 +1445,6 @@ export default function Home() {
         bestHabit: null as null | {
           title: string;
           adherenceLast365: number;
-          activeStreak: number;
         },
       };
     }
@@ -1416,11 +1471,114 @@ export default function Home() {
         ? {
             title: bestHabit.habit.title,
             adherenceLast365: bestHabit.adherenceLast365,
-            activeStreak: bestHabit.activeStreak,
           }
         : null,
     };
   }, [habitStats]);
+
+  const morningFlowStepCount = Object.values(morningFlowSteps).filter(Boolean).length;
+  const morningFlowTotalSteps = Object.keys(morningFlowSteps).length;
+  const morningFlowComplete = morningFlowStepCount === morningFlowTotalSteps;
+
+  const resetMorningFlow = () => {
+    setMorningFlowStatus("idle");
+    setMorningFlowSteps({
+      briefing: false,
+      focus: false,
+      identity: false,
+      habits: false,
+    });
+    localStorage.removeItem("morningFlowStatus");
+    localStorage.removeItem("morningFlowSteps");
+  };
+
+  const saveFocus3Override = () => {
+    const trimmed = focus3Draft
+      .map((item) => ({
+        label: item.label.trim(),
+        type: item.type.trim() || "Focus",
+      }))
+      .filter((item) => item.label.length > 0)
+      .slice(0, 3);
+    while (trimmed.length < 3) {
+      trimmed.push({ label: "Focus anchor", type: "Identity" });
+    }
+    const nextItems = trimmed.map((item, index) => ({
+      id: `manual-${index + 1}-${todayKey}`,
+      label: item.label,
+      type: item.type,
+    }));
+    setFocus3Snapshot(nextItems);
+    setFocus3OverrideDate(todayKey);
+    localStorage.setItem(
+      "focus3Override",
+      JSON.stringify({ date: todayKey, items: nextItems })
+    );
+    setFocus3Editing(false);
+  };
+
+  const resetFocus3Override = () => {
+    localStorage.removeItem("focus3Override");
+    setFocus3OverrideDate(null);
+    setFocus3SnapshotDate("");
+  };
+
+  const scrollToSection = (id: string) => {
+    const node = document.getElementById(id);
+    if (!node) return;
+    node.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const practiceInsights = useMemo(() => {
+    const items: Array<{ id: string; title: string; body: string; why: string[] }> = [];
+    if (morningFlowStatus === "idle") {
+      items.push({
+        id: "grounding-start",
+        title: "Start with a 60‑second grounding",
+        body: "A minimum morning reset sets the identity tone before tasks.",
+        why: ["Morning flow is not started yet today."],
+      });
+    }
+    if (identityScore > 0 && identityScore < 3) {
+      items.push({
+        id: "identity-minimum",
+        title: "Aim for a 3/5 identity check",
+        body: "Minimums still count, and 3‑5 is a strong day.",
+        why: [`You are at ${identityScore}/5 identity checks so far.`],
+      });
+    }
+    if (habitSummary.total > 0) {
+      const percent = Math.round((habitSummary.weekCount / habitSummary.total) * 100);
+      if (percent < 70) {
+        items.push({
+          id: "minimums-week",
+          title: "Lean on minimums to protect rhythm",
+          body: "A small check‑in keeps the practice alive without pressure.",
+          why: [
+            `This week you touched ${habitSummary.weekCount}/${habitSummary.total} practices.`,
+          ],
+        });
+      } else {
+        items.push({
+          id: "steady-week",
+          title: "Keep the steady rhythm",
+          body: "70–80% consistency is the target in Phase 1.",
+          why: [
+            `This week you touched ${habitSummary.weekCount}/${habitSummary.total} practices.`,
+          ],
+        });
+      }
+    }
+    if (focusThemes.length > 0) {
+      items.push({
+        id: "focus-themes",
+        title: "Let one focus area lead today",
+        body: "Pick one practice that matches the season you are in.",
+        why: [`Recent focus themes: ${focusThemes.join(", ")}.`],
+      });
+    }
+    return items.slice(0, 4);
+  }, [focusThemes, habitSummary.total, habitSummary.weekCount, identityScore, morningFlowStatus]);
 
   const logHabitForToday = (habitId: string, amountOverride?: number) => {
     const habit = habits.find((item) => item.id === habitId);
@@ -1620,6 +1778,132 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-zinc-950 via-slate-950 to-indigo-950 font-sans text-zinc-100">
       <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-8">
+        {activeTab === "practice" && morningFlowStatus !== "complete" && (
+          <section className="rounded-2xl border border-indigo-900/50 bg-zinc-900/90 p-5 shadow-sm backdrop-blur">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-indigo-300/80">
+                  Morning flow
+                </p>
+                <h2 className="text-xl font-semibold">Begin your daily reset</h2>
+                <p className="mt-1 text-sm text-zinc-300">
+                  Ground, choose focus, check identity, then log a minimum practice.
+                </p>
+              </div>
+              <div className="rounded-full border border-indigo-800/60 bg-indigo-500/10 px-3 py-1 text-xs text-indigo-200">
+                {morningFlowStepCount}/{morningFlowTotalSteps} steps
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {morningFlowStatus === "idle" && (
+                <button
+                  type="button"
+                  onClick={() => setMorningFlowStatus("in_progress")}
+                  className="rounded-full bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-400"
+                >
+                  Start morning flow
+                </button>
+              )}
+              {morningFlowStatus === "in_progress" && (
+                <button
+                  type="button"
+                  onClick={() => setMorningFlowStatus("in_progress")}
+                  className="rounded-full border border-indigo-700/60 px-4 py-2 text-xs text-indigo-200"
+                >
+                  Resume flow
+                </button>
+              )}
+              {morningFlowStatus === "in_progress" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!morningFlowComplete) return;
+                    setMorningFlowStatus("complete");
+                  }}
+                  className={`rounded-full px-4 py-2 text-xs font-medium text-white ${
+                    morningFlowComplete
+                      ? "bg-emerald-500 hover:bg-emerald-400"
+                      : "bg-emerald-500/30 text-emerald-200"
+                  }`}
+                  disabled={!morningFlowComplete}
+                >
+                  Mark flow complete
+                </button>
+              )}
+            </div>
+            {morningFlowStatus === "in_progress" && (
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {[
+                  {
+                    id: "briefing",
+                    label: "Read the morning briefing",
+                    helper: "Understand the day’s constraints and values reminder.",
+                    target: "#morning-briefing",
+                  },
+                  {
+                    id: "focus",
+                    label: "Set Focus 3",
+                    helper: "Pick what matters most, not what is loudest.",
+                    target: "#focus-3",
+                  },
+                  {
+                    id: "identity",
+                    label: "Complete the identity check",
+                    helper: "3–5 checks is a strong day.",
+                    target: "#identity-check",
+                  },
+                  {
+                    id: "habits",
+                    label: "Log a minimum practice",
+                    helper: "Log one small habit check-in to keep momentum.",
+                    target: "#habit-checkin",
+                  },
+                ].map((step) => {
+                  const isDone = morningFlowSteps[step.id as keyof typeof morningFlowSteps];
+                  return (
+                    <div
+                      key={step.id}
+                      className="rounded-xl border border-indigo-900/50 bg-indigo-500/10 px-3 py-3 text-sm text-indigo-100"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="font-medium">{step.label}</p>
+                          <p className="mt-1 text-xs text-indigo-100/80">{step.helper}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMorningFlowSteps((prev) => ({
+                              ...prev,
+                              [step.id]: !isDone,
+                            }))
+                          }
+                          className={`rounded-full border px-2 py-1 text-[11px] ${
+                            isDone
+                              ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-100"
+                              : "border-indigo-700/60 text-indigo-200"
+                          }`}
+                        >
+                          {isDone ? "Done" : "Mark done"}
+                        </button>
+                      </div>
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={() => scrollToSection(step.target.replace("#", ""))}
+                          className="text-[11px] text-indigo-200 underline-offset-2 hover:underline"
+                        >
+                          Jump to section
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
+
         <header className="flex flex-col gap-2">
           <p className="text-sm uppercase tracking-[0.2em] text-zinc-400">
             Daily System
@@ -1630,6 +1914,17 @@ export default function Home() {
           <p className="text-sm text-zinc-400">
             Calm, goal-aligned, and ready for check-ins anytime today.
           </p>
+          {activeTab === "practice" && (
+            <div>
+              <button
+                type="button"
+                onClick={resetMorningFlow}
+                className="rounded-full border border-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:text-white"
+              >
+                Reset morning flow
+              </button>
+            </div>
+          )}
         </header>
 
         <div className="flex w-full items-center justify-start">
@@ -1661,57 +1956,11 @@ export default function Home() {
 
         {activeTab === "practice" && (
           <>
-            <section className="rounded-2xl border border-indigo-900/40 bg-zinc-900/80 p-5 shadow-sm backdrop-blur">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold">Morning Flow</h2>
-                  <p className="text-sm text-zinc-300">
-                    Briefing → Focus 3 → Identity Check → Habit Check‑in
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {morningFlowStatus === "idle" && (
-                    <button
-                      type="button"
-                      onClick={() => setMorningFlowStatus("in_progress")}
-                      className="rounded-full bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-400"
-                    >
-                      Start flow
-                    </button>
-                  )}
-                  {morningFlowStatus === "in_progress" && (
-                    <button
-                      type="button"
-                      onClick={() => setMorningFlowStatus("complete")}
-                      className="rounded-full bg-emerald-500 px-4 py-2 text-xs font-medium text-white hover:bg-emerald-400"
-                    >
-                      Mark complete
-                    </button>
-                  )}
-                  {morningFlowStatus === "complete" && (
-                    <span className="rounded-full border border-emerald-700/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
-                      Completed today
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-400">
-                <span className="rounded-full border border-indigo-700/50 bg-indigo-500/10 px-2 py-1 text-indigo-200">
-                  Briefing
-                </span>
-                <span className="rounded-full border border-indigo-700/50 bg-indigo-500/10 px-2 py-1 text-indigo-200">
-                  Focus 3
-                </span>
-                <span className="rounded-full border border-indigo-700/50 bg-indigo-500/10 px-2 py-1 text-indigo-200">
-                  Identity
-                </span>
-                <span className="rounded-full border border-indigo-700/50 bg-indigo-500/10 px-2 py-1 text-indigo-200">
-                  Habits
-                </span>
-              </div>
-            </section>
             <section className="grid gap-4 md:grid-cols-[1.2fr_1fr]">
-              <div className="rounded-2xl border border-indigo-900/50 bg-zinc-900/80 p-5 shadow-sm backdrop-blur">
+              <div
+                id="morning-briefing"
+                className="rounded-2xl border border-indigo-900/50 bg-zinc-900/80 p-5 shadow-sm backdrop-blur"
+              >
                 <h2 className="text-lg font-semibold">Morning Briefing</h2>
                 <p className="mt-2 text-sm text-zinc-300">
                   {hasTodoist || hasCalendar ? briefingCopy : briefingCopy}
@@ -1736,25 +1985,161 @@ export default function Home() {
                   </ul>
                 </div>
               </div>
-              <div className="rounded-2xl border border-emerald-900/50 bg-zinc-900/80 p-5 shadow-sm backdrop-blur">
-                <h2 className="text-lg font-semibold">Focus 3</h2>
-                <ul className="mt-3 space-y-2 text-sm text-zinc-200">
-                  {focus3Snapshot.map((item) => (
-                    <li
-                      key={item.id}
-                      className="rounded-lg border border-emerald-900/50 bg-emerald-500/10 px-3 py-2"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium">{item.label}</span>
-                        <span className="text-[11px] text-emerald-300">
-                          {item.type}
-                        </span>
+              <div
+                id="focus-3"
+                className="rounded-2xl border border-emerald-900/50 bg-zinc-900/80 p-5 shadow-sm backdrop-blur"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-lg font-semibold">Focus 3</h2>
+                    <p className="text-sm text-zinc-300">
+                      Choose what matters most today, not what is loudest.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {!focus3Editing && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFocus3Draft(
+                            (focus3Snapshot.length ? focus3Snapshot : selectFocus3()).map(
+                              (item) => ({ label: item.label, type: item.type })
+                            )
+                          );
+                          setFocus3Editing(true);
+                        }}
+                        className="rounded-full border border-emerald-700/60 px-3 py-1 text-xs text-emerald-200 hover:text-white"
+                      >
+                        Edit focus 3
+                      </button>
+                    )}
+                    {!focus3Editing && focus3OverrideDate === todayKey && (
+                      <button
+                        type="button"
+                        onClick={resetFocus3Override}
+                        className="rounded-full border border-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:text-white"
+                      >
+                        Reset to auto
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {focus3Editing ? (
+                  <div className="mt-3 space-y-2 text-sm text-zinc-200">
+                    {[0, 1, 2].map((index) => (
+                      <div
+                        key={`focus3-edit-${index}`}
+                        className="rounded-lg border border-emerald-900/50 bg-emerald-500/10 px-3 py-2"
+                      >
+                        <div className="grid gap-2 sm:grid-cols-[2fr_1fr]">
+                          <input
+                            className="w-full rounded-lg border border-emerald-900/50 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
+                            placeholder={`Focus ${index + 1}`}
+                            value={focus3Draft[index]?.label ?? ""}
+                            onChange={(event) =>
+                              setFocus3Draft((prev) => {
+                                const next = [...prev];
+                                next[index] = {
+                                  label: event.target.value,
+                                  type: next[index]?.type ?? "Focus",
+                                };
+                                return next;
+                              })
+                            }
+                          />
+                          <input
+                            className="w-full rounded-lg border border-emerald-900/50 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
+                            placeholder="Type (e.g., Task, Identity)"
+                            value={focus3Draft[index]?.type ?? ""}
+                            onChange={(event) =>
+                              setFocus3Draft((prev) => {
+                                const next = [...prev];
+                                next[index] = {
+                                  label: next[index]?.label ?? "",
+                                  type: event.target.value,
+                                };
+                                return next;
+                              })
+                            }
+                          />
+                        </div>
                       </div>
-                    </li>
-                  ))}
-                </ul>
+                    ))}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={saveFocus3Override}
+                        className="rounded-full bg-emerald-500 px-4 py-2 text-xs font-medium text-white hover:bg-emerald-400"
+                      >
+                        Save focus 3
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFocus3Editing(false)}
+                        className="rounded-full border border-zinc-800 px-4 py-2 text-xs text-zinc-300 hover:text-white"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <ul className="mt-3 space-y-2 text-sm text-zinc-200">
+                    {focus3Snapshot.map((item) => (
+                      <li
+                        key={item.id}
+                        className="rounded-lg border border-emerald-900/50 bg-emerald-500/10 px-3 py-2"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium">{item.label}</span>
+                          <span className="text-[11px] text-emerald-300">
+                            {item.type}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </section>
+
+          <section className="rounded-2xl border border-indigo-900/40 bg-zinc-900/80 p-5 shadow-sm backdrop-blur">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-semibold">Insights</h2>
+                <p className="text-sm text-zinc-300">
+                  Calm, explainable nudges tied to your identity practices.
+                </p>
+              </div>
+              <span className="rounded-full border border-indigo-900/50 bg-indigo-500/10 px-3 py-1 text-xs text-indigo-200">
+                Explainable only
+              </span>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {practiceInsights.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-indigo-900/60 bg-zinc-950/40 px-3 py-3 text-sm text-zinc-400">
+                  No insights yet. Add a few check-ins to activate suggestions.
+                </div>
+              ) : (
+                practiceInsights.map((insight) => (
+                  <div
+                    key={insight.id}
+                    className="rounded-xl border border-indigo-900/50 bg-indigo-500/10 px-3 py-3 text-sm text-indigo-100"
+                  >
+                    <p className="font-medium">{insight.title}</p>
+                    <p className="mt-1 text-xs text-indigo-100/80">{insight.body}</p>
+                    <div className="mt-2 rounded-lg border border-indigo-900/60 bg-zinc-950/40 px-2 py-2 text-[11px] text-zinc-300">
+                      <p className="font-semibold text-indigo-200">Why this</p>
+                      <ul className="mt-1 space-y-1">
+                        {insight.why.map((reason, index) => (
+                          <li key={`${insight.id}-why-${index}`}>{reason}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
 
             <section className="rounded-2xl border border-indigo-900/40 bg-zinc-900/80 p-5 shadow-sm backdrop-blur">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1806,7 +2191,10 @@ export default function Home() {
               </p>
             </section>
 
-            <section className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5 shadow-sm backdrop-blur">
+            <section
+              id="habit-checkin"
+              className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5 shadow-sm backdrop-blur"
+            >
               <h2 className="text-lg font-semibold">Habit Check‑in</h2>
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm text-zinc-300">
                 <p>
@@ -1821,6 +2209,10 @@ export default function Home() {
                   {habitLoading ? "Loading..." : "Load habit history"}
                 </button>
               </div>
+              <p className="mt-2 text-xs text-zinc-400">
+                Minimum practice = one quick habit check-in (or a small amount entry) to keep
+                identity momentum.
+              </p>
               {habitError && (
                 <p className="mt-2 text-xs text-rose-400">{habitError}</p>
               )}
@@ -1852,8 +2244,7 @@ export default function Home() {
                   {habitSummary.bestHabit && (
                     <span>
                       Most consistent: {habitSummary.bestHabit.title} ·{" "}
-                      {habitSummary.bestHabit.adherenceLast365}% ·{" "}
-                      {habitSummary.bestHabit.activeStreak}d
+                      {habitSummary.bestHabit.adherenceLast365}% last 365 days
                     </span>
                   )}
                 </div>
@@ -1870,6 +2261,35 @@ export default function Home() {
                   />
                 </div>
               </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="rounded-xl border border-amber-900/40 bg-zinc-950/40 px-3 py-3 text-xs text-zinc-200">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                    Weekly practice review
+                  </p>
+                  <p className="mt-2 text-sm text-amber-100">
+                    {habitSummary.total === 0
+                      ? "Load history to see weekly patterns."
+                      : `Week-to-date: ${habitSummary.weekCount}/${habitSummary.total} practices touched.`}
+                  </p>
+                  {habitSummary.bestHabit && (
+                    <p className="mt-2 text-[11px] text-amber-100/80">
+                      Most consistent: {habitSummary.bestHabit.title} ·{" "}
+                      {habitSummary.bestHabit.adherenceLast365}% last 365 days
+                    </p>
+                  )}
+                </div>
+                <div className="rounded-xl border border-emerald-900/40 bg-zinc-950/40 px-3 py-3 text-xs text-zinc-200">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                    Minimums are valid
+                  </p>
+                  <p className="mt-2 text-sm text-emerald-100">
+                    70–80% consistency is the target. Minimums protect identity momentum.
+                  </p>
+                  <p className="mt-2 text-[11px] text-emerald-100/80">
+                    Choose the minimum version when energy is low.
+                  </p>
+                </div>
+              </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 {habitStats.length === 0 && (
                   <div className="rounded-lg border border-dashed border-amber-900/50 bg-zinc-950/40 px-3 py-3 text-xs text-zinc-400">
@@ -1881,11 +2301,8 @@ export default function Home() {
                     habit,
                     last7,
                     sumLast7,
-                    activeStreak,
-                    adherencePercent,
                     adherenceLast365,
                     adherenceCurrentYear,
-                    longestStreak,
                     weekdayTotals,
                     weekdaySuccess,
                     monthTotals,
@@ -1949,7 +2366,11 @@ export default function Home() {
                               </p>
                             </div>
                             <div className="text-right text-[11px] text-amber-200">
-                              <p>{activeStreak} active streak</p>
+                              <p>
+                                {habit.kind === "amount"
+                                  ? `${sumLast7} last 7 days`
+                                  : `${sumLast7} check-ins (7 days)`}
+                              </p>
                               <p>{adherenceLast365}% last 365 days</p>
                               <p>{adherenceCurrentYear}% {new Date().getFullYear()}</p>
                             </div>
@@ -2051,12 +2472,28 @@ export default function Home() {
                           <div className="mt-4 space-y-3 text-xs text-zinc-200">
                             <div className="grid gap-2 sm:grid-cols-2">
                               <div className="rounded-md border border-amber-900/40 bg-zinc-950/40 px-3 py-2">
-                                <p className="text-[11px] text-amber-100/80">Active streak</p>
-                                <p className="text-sm font-medium">{activeStreak}</p>
+                                <p className="text-[11px] text-amber-100/80">Last 7 days</p>
+                                <p className="text-sm font-medium">
+                                  {habit.kind === "amount"
+                                    ? `${sumLast7} total`
+                                    : `${sumLast7} check-ins`}
+                                </p>
                               </div>
                               <div className="rounded-md border border-amber-900/40 bg-zinc-950/40 px-3 py-2">
-                                <p className="text-[11px] text-amber-100/80">Longest streak</p>
-                                <p className="text-sm font-medium">{longestStreak}</p>
+                                <p className="text-[11px] text-amber-100/80">
+                                  Consistency (365d)
+                                </p>
+                                <p className="text-sm font-medium">
+                                  {adherenceLast365}% of {isDaily ? "days" : "weeks"}
+                                </p>
+                              </div>
+                              <div className="rounded-md border border-amber-900/40 bg-zinc-950/40 px-3 py-2">
+                                <p className="text-[11px] text-amber-100/80">
+                                  Consistency ({new Date().getFullYear()})
+                                </p>
+                                <p className="text-sm font-medium">
+                                  {adherenceCurrentYear}% of {isDaily ? "days" : "weeks"}
+                                </p>
                               </div>
                               <div className="rounded-md border border-amber-900/40 bg-zinc-950/40 px-3 py-2">
                                 <p className="text-[11px] text-amber-100/80">
@@ -2068,26 +2505,10 @@ export default function Home() {
                                     : `${successWeeksCount} weeks`}
                                 </p>
                               </div>
-                              <div className="rounded-md border border-amber-900/40 bg-zinc-950/40 px-3 py-2">
-                                <p className="text-[11px] text-amber-100/80">Adherence</p>
-                                <p className="text-sm font-medium">
-                                  {adherencePercent}% of {isDaily ? "days" : "weeks"}
-                                </p>
-                              </div>
                             </div>
 
                             <div className="rounded-md border border-zinc-900/40 bg-zinc-950/40 px-3 py-2">
-                              <p className="text-[11px] text-amber-100/80">
-                                Successes (total)
-                              </p>
-                              <p className="mt-1 text-sm font-medium">
-                                {isDaily ? successDaysCount : successWeeksCount}{" "}
-                                {isDaily ? "days" : "weeks"}
-                              </p>
-                            </div>
-
-                            <div className="rounded-md border border-zinc-900/40 bg-zinc-950/40 px-3 py-2">
-                              <p className="text-[11px] text-amber-100/80">Active periods</p>
+                              <p className="text-[11px] text-amber-100/80">Tracking span</p>
                               <p className="mt-1 text-sm font-medium">
                                 {isDaily ? totalDays : totalWeeks}{" "}
                                 {isDaily ? "days tracked" : "weeks tracked"}
@@ -2328,6 +2749,121 @@ export default function Home() {
                                 </div>
                               )}
                             </div>
+
+                            {habitDetailView === "month" && (
+                              <div className="rounded-md border border-amber-900/40 bg-zinc-950/40 px-3 py-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <p className="text-[11px] text-amber-100/80">
+                                    Month detail (tap a day)
+                                  </p>
+                                  <span className="text-[10px] text-zinc-400">
+                                    {monthLabel}
+                                  </span>
+                                </div>
+                                <div className="mt-3 grid grid-cols-7 gap-2 text-[10px] text-zinc-400">
+                                  {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
+                                    <span key={`${habit.id}-month-${day}-${index}`} className="text-center">
+                                      {day}
+                                    </span>
+                                  ))}
+                                </div>
+                                <div className="mt-2 grid grid-cols-7 gap-2 text-[10px] text-zinc-200">
+                                  {Array.from({ length: monthDays.startOffset }).map((_, index) => (
+                                    <div key={`${habit.id}-month-empty-${index}`} className="h-10" />
+                                  ))}
+                                  {Array.from({ length: monthDays.daysInMonth }).map((_, index) => {
+                                    const dayNumber = index + 1;
+                                    const dateKey = `${monthDays.year}-${String(
+                                      monthDays.month + 1
+                                    ).padStart(2, "0")}-${String(dayNumber).padStart(2, "0")}`;
+                                    const value = totalsByDay.get(dateKey) ?? 0;
+                                    const isSelected =
+                                      (habitMonthFocusByHabit[habit.id] ?? null) === dateKey;
+                                    return (
+                                      <button
+                                        key={`${habit.id}-month-${dateKey}`}
+                                        type="button"
+                                        onClick={() =>
+                                          setHabitMonthFocusByHabit((prev) => ({
+                                            ...prev,
+                                            [habit.id]: dateKey,
+                                          }))
+                                        }
+                                        className={`flex h-10 flex-col items-center justify-center rounded-md border px-1 ${
+                                          isSelected
+                                            ? "border-amber-400/70 bg-amber-400/10"
+                                            : "border-zinc-800 bg-zinc-950/40"
+                                        }`}
+                                      >
+                                        <span className="font-semibold">{dayNumber}</span>
+                                        <span className="text-[9px] text-amber-100/80">
+                                          {value > 0 ? value : ""}
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                <div className="mt-3 rounded-md border border-zinc-900/40 bg-zinc-950/40 px-3 py-2 text-[11px] text-zinc-200">
+                                  {habitMonthFocusByHabit[habit.id] ? (
+                                    <>
+                                      <p className="text-[11px] text-amber-100/80">
+                                        {habitMonthFocusByHabit[habit.id]}
+                                      </p>
+                                      {habitSessions.filter((session) => {
+                                        if (session.habitId !== habit.id) return false;
+                                        const parsed = new Date(session.createdAt);
+                                        if (Number.isNaN(parsed.getTime())) return false;
+                                        return (
+                                          toDateKey(parsed) === habitMonthFocusByHabit[habit.id]
+                                        );
+                                      }).length === 0 ? (
+                                        <p className="mt-1 text-zinc-400">No sessions logged.</p>
+                                      ) : (
+                                        <div className="mt-1 space-y-1">
+                                          {habitSessions
+                                            .filter((session) => {
+                                              if (session.habitId !== habit.id) return false;
+                                              const parsed = new Date(session.createdAt);
+                                              if (Number.isNaN(parsed.getTime())) return false;
+                                              return (
+                                                toDateKey(parsed) ===
+                                                habitMonthFocusByHabit[habit.id]
+                                              );
+                                            })
+                                            .map((session) => {
+                                              const time = new Date(session.createdAt).toLocaleTimeString(
+                                                [],
+                                                { hour: "2-digit", minute: "2-digit" }
+                                              );
+                                              const amount =
+                                                habit.kind === "amount"
+                                                  ? session.amount ?? 0
+                                                  : 1;
+                                              return (
+                                                <div
+                                                  key={session.id}
+                                                  className="flex items-center justify-between"
+                                                >
+                                                  <span>{time}</span>
+                                                  <span className="text-amber-100/80">
+                                                    {habit.kind === "amount"
+                                                      ? amount
+                                                      : "check-in"}
+                                                  </span>
+                                                </div>
+                                              );
+                                            })}
+                                        </div>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <p className="text-zinc-400">
+                                      Select a day to see the practice details.
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
