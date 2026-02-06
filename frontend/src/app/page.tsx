@@ -1,16 +1,27 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CalendarEventContract, TaskContract } from "@/lib/contracts";
 import type { Habit, HabitSession } from "@/lib/habits";
-import {
-  fetchHabitsFromApi,
-  loadHabitsFromStorage,
-  saveHabitsToStorage,
-} from "@/lib/habitStore";
+import type { Goal } from "@/lib/goals";
 import { buildBriefingContext } from "@/lib/ai";
-import { activeGoals } from "@/lib/goals";
 import { useAIBriefing } from "@/lib/useAIBriefing";
+import { createClient } from "@/lib/supabase/client";
+import {
+  loadIdentityMetrics,
+  saveIdentityMetrics,
+  loadMorningFlow,
+  saveMorningFlow,
+  deleteMorningFlow,
+  loadFocus3,
+  saveFocus3,
+  deleteFocus3,
+  loadGoals,
+  loadHabits,
+  loadHabitSessions,
+  loadAIBriefing as _loadAIBriefing,
+} from "@/lib/supabase/data";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
 
 export default function Home() {
   const [todoistTasks, setTodoistTasks] = useState<TaskContract[]>([]);
@@ -623,6 +634,24 @@ export default function Home() {
   }, []);
 
   const loadGoogleCalendars = useCallback(async (silent = false) => {
+    // #region agent log
+    void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "debug-session",
+        runId: "pre-fix",
+        hypothesisId: "H1",
+        location: "page.tsx:loadGoogleCalendars:entry",
+        message: "Entering loadGoogleCalendars",
+        data: {
+          silent,
+          selectedCalendarIdsLength: selectedCalendarIds.length,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     try {
       const response = await fetch("/api/google/calendars");
       if (!response.ok) {
@@ -641,6 +670,7 @@ export default function Home() {
       };
       const calendars = payload.items ?? [];
       setGoogleCalendars(calendars);
+      let nextSelectedIds = selectedCalendarIds;
       if (!selectedCalendarIds.length) {
         const defaultNames = new Set([
           "Personal Calendar",
@@ -651,8 +681,28 @@ export default function Home() {
         const defaults = calendars
           .filter((item) => defaultNames.has(item.name))
           .map((item) => item.id);
-        setSelectedCalendarIds(defaults.length ? defaults : calendars.map((item) => item.id));
+        nextSelectedIds = defaults.length ? defaults : calendars.map((item) => item.id);
+        setSelectedCalendarIds(nextSelectedIds);
       }
+      // #region agent log
+      void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "debug-session",
+          runId: "pre-fix",
+          hypothesisId: "H2",
+          location: "page.tsx:loadGoogleCalendars:afterFetch",
+          message: "Loaded Google calendars and computed selected ids",
+          data: {
+            calendarCount: calendars.length,
+            selectedCalendarIdsBefore: selectedCalendarIds,
+            selectedCalendarIdsAfter: nextSelectedIds,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
     } catch (error) {
       if (!silent) {
         setCalendarError(
@@ -664,6 +714,24 @@ export default function Home() {
 
   const loadCalendar = useCallback(
     async (silent = false) => {
+      // #region agent log
+      void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "debug-session",
+          runId: "pre-fix",
+          hypothesisId: "H3",
+          location: "page.tsx:loadCalendar:entry",
+          message: "Entering loadCalendar",
+          data: {
+            silent,
+            selectedCalendarIds,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setCalendarLoading(true);
       setCalendarError(null);
       try {
@@ -686,6 +754,25 @@ export default function Home() {
           items: CalendarEventContract[];
         };
         setCalendarEvents(payload.items ?? []);
+        // #region agent log
+        void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: "debug-session",
+            runId: "pre-fix",
+            hypothesisId: "H3",
+            location: "page.tsx:loadCalendar:afterFetch",
+            message: "Loaded calendar events",
+            data: {
+              responseStatus: response.status,
+              calendarParam,
+              itemsCount: payload.items?.length ?? 0,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
       } catch (error) {
         if (!silent) {
           setCalendarError(

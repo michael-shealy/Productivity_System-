@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import type { AIBriefingRequest, AIBriefingResponse, AIInsightCard } from "@/lib/ai";
+import { getRouteUser } from "@/lib/supabase/route";
 
 const SYSTEM_PROMPT = `You are a calm, identity-focused daily coach embedded in a personal productivity system.
 
@@ -90,12 +91,10 @@ function buildUserPrompt(ctx: AIBriefingRequest): string {
 }
 
 function parseResponse(text: string): AIBriefingResponse {
-  // Try direct JSON parse first
   try {
     const parsed = JSON.parse(text);
     return validateResponse(parsed);
   } catch {
-    // Fallback: extract JSON from markdown fences
     const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
     if (fenceMatch) {
       const parsed = JSON.parse(fenceMatch[1]);
@@ -134,24 +133,13 @@ function validateResponse(obj: Record<string, unknown>): AIBriefingResponse {
 }
 
 export async function POST(request: Request) {
+  const { user } = await getRouteUser();
+  if (!user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    // #region agent log
-    void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "debug-session",
-        runId: "pre-fix",
-        hypothesisId: "H7",
-        location: "api/ai/briefing/route.ts:POST.missingKey",
-        message: "ANTHROPIC_API_KEY missing on server",
-        data: {},
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-
     return NextResponse.json(
       { error: "ANTHROPIC_API_KEY not configured" },
       { status: 503 }
@@ -193,26 +181,6 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("AI briefing generation failed", error);
     const detail = error instanceof Error ? error.message : "Unknown error";
-
-    // #region agent log
-    void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "debug-session",
-        runId: "pre-fix",
-        hypothesisId: "H8",
-        location: "api/ai/briefing/route.ts:POST.catch",
-        message: "AI briefing generation failed in route",
-        data: {
-          detail,
-          errorName: error instanceof Error ? error.name : typeof error,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-
     return NextResponse.json(
       { error: "AI briefing generation failed", detail },
       { status: 502 }

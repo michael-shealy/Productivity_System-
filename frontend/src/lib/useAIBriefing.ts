@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AIBriefingRequest, AIBriefingResponse } from "@/lib/ai";
-import { getCachedBriefing, setCachedBriefing, clearBriefingCache } from "@/lib/ai";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { loadAIBriefing, saveAIBriefing, deleteAIBriefing } from "@/lib/supabase/data";
 
 type UseAIBriefingReturn = {
   briefing: AIBriefingResponse | null;
@@ -12,7 +13,9 @@ type UseAIBriefingReturn = {
 };
 
 export function useAIBriefing(
-  context: AIBriefingRequest | null
+  context: AIBriefingRequest | null,
+  supabase: SupabaseClient | null,
+  userId: string | null
 ): UseAIBriefingReturn {
   const [briefing, setBriefing] = useState<AIBriefingResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -47,52 +50,12 @@ export function useAIBriefing(
 
   const fetchBriefing = useCallback(
     async (ctx: AIBriefingRequest, skipCache: boolean) => {
-      if (!skipCache && ctx.today) {
-        const cached = getCachedBriefing(ctx.today);
-
-        // #region agent log
-        void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "debug-session",
-            runId: "pre-fix",
-            hypothesisId: "H1",
-            location: "useAIBriefing.ts:fetchBriefing.cacheCheck",
-            message: "Checked cache for AI briefing",
-            data: {
-              today: ctx.today,
-              skipCache,
-              cacheHit: Boolean(cached),
-              fetchedDateRef: fetchedDateRef.current,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
-
+      // Check Supabase cache first
+      if (!skipCache && ctx.today && supabase && userId) {
+        const cached = await loadAIBriefing(supabase, userId, ctx.today);
         if (cached) {
           setBriefing(cached);
           fetchedDateRef.current = ctx.today;
-
-          // #region agent log
-          void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sessionId: "debug-session",
-              runId: "pre-fix",
-              hypothesisId: "H1",
-              location: "useAIBriefing.ts:fetchBriefing.cacheHitReturn",
-              message: "Returning early from cache",
-              data: {
-                today: ctx.today,
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
-
           return;
         }
       }
@@ -110,26 +73,6 @@ export function useAIBriefing(
       if (mountedRef.current) {
         setLoading(true);
         setError(null);
-
-        // #region agent log
-        void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "debug-session",
-            runId: "pre-fix",
-            hypothesisId: "H2",
-            location: "useAIBriefing.ts:fetchBriefing.startNetwork",
-            message: "Starting network request for briefing",
-            data: {
-              today: ctx.today,
-              requestId,
-              skipCache,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
       }
 
       try {
@@ -191,32 +134,6 @@ export function useAIBriefing(
               "AI briefing unavailable due to an unexpected error connecting to Anthropic.";
           }
 
-          // #region agent log
-          void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sessionId: "debug-session",
-              runId: "pre-fix",
-              hypothesisId: "H6",
-              location: "useAIBriefing.ts:fetchBriefing.httpError",
-              message: "Briefing API returned non-OK response",
-              data: {
-                today: ctx.today,
-                requestId,
-                status: response.status,
-                payloadError:
-                  typeof (payload as Record<string, unknown>).error === "string"
-                    ? ((payload as Record<string, unknown>).error as string)
-                    : null,
-                payloadDetail: detail,
-                userMessage,
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
-
           throw new Error(userMessage);
         }
 
@@ -224,85 +141,24 @@ export function useAIBriefing(
         if (mountedRef.current && requestId === requestIdRef.current) {
           setBriefing(data);
           fetchedDateRef.current = ctx.today;
-          if (ctx.today) {
-            setCachedBriefing(ctx.today, data);
+          // Save to Supabase cache
+          if (ctx.today && supabase && userId) {
+            saveAIBriefing(supabase, userId, ctx.today, data).catch(() => {});
           }
-
-          // #region agent log
-          void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sessionId: "debug-session",
-              runId: "pre-fix",
-              hypothesisId: "H3",
-              location: "useAIBriefing.ts:fetchBriefing.success",
-              message: "Briefing request succeeded and state updated",
-              data: {
-                today: ctx.today,
-                requestId,
-                hasHeadline: Boolean(data.headline),
-                hasInsights: Boolean(data.insights?.length),
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
         }
       } catch (err) {
         if ((err as Error).name === "AbortError") return;
         if (mountedRef.current && requestId === requestIdRef.current) {
           setError(err instanceof Error ? err.message : "Failed to fetch briefing");
-
-          // #region agent log
-          void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sessionId: "debug-session",
-              runId: "pre-fix",
-              hypothesisId: "H4",
-              location: "useAIBriefing.ts:fetchBriefing.error",
-              message: "Briefing request errored",
-              data: {
-                today: ctx.today,
-                requestId,
-                errorName: (err as Error).name,
-                errorMessage: err instanceof Error ? err.message : String(err),
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
         }
       } finally {
         if (mountedRef.current && requestId === requestIdRef.current) {
           setLoading(false);
           abortRef.current = null;
-
-          // #region agent log
-          void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sessionId: "debug-session",
-              runId: "pre-fix",
-              hypothesisId: "H2",
-              location: "useAIBriefing.ts:fetchBriefing.finally",
-              message: "Finished network request for briefing",
-              data: {
-                today: ctx.today,
-                requestId,
-                loading: false,
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
         }
       }
     },
-    []
+    [supabase, userId]
   );
 
   // Auto-fire once when context becomes available, or on refresh
@@ -310,28 +166,6 @@ export function useAIBriefing(
     if (!context) return;
     const currentDate = context.today;
     if (!currentDate) return;
-
-    // #region agent log
-    void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "debug-session",
-        runId: "pre-fix",
-        hypothesisId: "H5",
-        location: "useAIBriefing.ts:autoEffect",
-        message: "Auto effect deciding to fetch briefing",
-        data: {
-          hasContext: Boolean(context),
-          today: currentDate,
-          refreshCounter,
-          fetchedDateRef: fetchedDateRef.current,
-          autoRequestedDateRef: autoRequestedDateRef.current,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
 
     if (refreshCounter === 0) {
       if (autoRequestedDateRef.current === currentDate) {
@@ -348,11 +182,14 @@ export function useAIBriefing(
 
   const refresh = useCallback(() => {
     if (!context) return;
-    clearBriefingCache();
+    // Delete Supabase cache for today
+    if (context.today && supabase && userId) {
+      deleteAIBriefing(supabase, userId, context.today).catch(() => {});
+    }
     setBriefing(null);
     fetchedDateRef.current = null;
     setRefreshCounter((c) => c + 1);
-  }, [context]);
+  }, [context, supabase, userId]);
 
   return { briefing, loading, error, refresh };
 }

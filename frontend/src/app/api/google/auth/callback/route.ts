@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getRouteUser } from "@/lib/supabase/route";
+import { upsertOAuthToken } from "@/lib/supabase/tokens";
 
 function getEnv(name: string) {
   const value = process.env[name];
@@ -53,6 +55,11 @@ export async function GET(request: Request) {
     );
   }
 
+  const { supabase, user } = await getRouteUser();
+  if (!user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
   const clientId = getEnv("GOOGLE_CLIENT_ID");
   const clientSecret = getEnv("GOOGLE_CLIENT_SECRET");
   const redirectUri = getEnv("GOOGLE_REDIRECT_URI");
@@ -82,24 +89,21 @@ export async function GET(request: Request) {
   const tokenData = (await tokenResponse.json()) as {
     access_token: string;
     refresh_token?: string;
+    expires_in?: number;
   };
+
+  await upsertOAuthToken(
+    supabase,
+    user.id,
+    "google",
+    tokenData.access_token,
+    tokenData.refresh_token,
+    tokenData.expires_in
+  );
 
   const origin = new URL(request.url).origin;
   const response = NextResponse.redirect(`${origin}/`);
-  response.cookies.set("google_access_token", tokenData.access_token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-  });
-  if (tokenData.refresh_token) {
-    response.cookies.set("google_refresh_token", tokenData.refresh_token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-    });
-  }
+  // Clear the CSRF state cookie
   response.cookies.set("oauth_state_google", "", {
     httpOnly: true,
     sameSite: "lax",

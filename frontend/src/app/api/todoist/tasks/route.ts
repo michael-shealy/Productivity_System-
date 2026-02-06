@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 import { normalizeCompletedTodoistTask, normalizeTodoistTask } from "@/lib/contracts";
+import { getRouteUser } from "@/lib/supabase/route";
+import { getOAuthToken } from "@/lib/supabase/tokens";
 
-function getCookieValue(cookieHeader: string | null, name: string) {
-  return cookieHeader?.match(new RegExp(`${name}=([^;]+)`))?.[1];
+async function getTodoistToken() {
+  const { supabase, user } = await getRouteUser();
+  if (!user) return null;
+  const result = await getOAuthToken(supabase, user.id, "todoist");
+  return result?.access_token ?? null;
 }
 
 export async function GET(request: Request) {
-  const token = getCookieValue(request.headers.get("cookie"), "todoist_access_token");
+  const token = await getTodoistToken();
   if (!token) {
     return NextResponse.json({ error: "Missing Todoist token" }, { status: 401 });
   }
@@ -70,7 +75,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const token = getCookieValue(request.headers.get("cookie"), "todoist_access_token");
+  const token = await getTodoistToken();
   if (!token) {
     return NextResponse.json({ error: "Missing Todoist token" }, { status: 401 });
   }
@@ -117,7 +122,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const token = getCookieValue(request.headers.get("cookie"), "todoist_access_token");
+  const token = await getTodoistToken();
   if (!token) {
     return NextResponse.json({ error: "Missing Todoist token" }, { status: 401 });
   }
@@ -196,7 +201,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const token = getCookieValue(request.headers.get("cookie"), "todoist_access_token");
+  const token = await getTodoistToken();
   if (!token) {
     return NextResponse.json({ error: "Missing Todoist token" }, { status: 401 });
   }

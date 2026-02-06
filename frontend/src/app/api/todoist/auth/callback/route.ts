@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getRouteUser } from "@/lib/supabase/route";
+import { upsertOAuthToken } from "@/lib/supabase/tokens";
 
 function getEnv(name: string) {
   const value = process.env[name];
@@ -53,6 +55,11 @@ export async function GET(request: Request) {
     );
   }
 
+  const { supabase, user } = await getRouteUser();
+  if (!user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
   const clientId = getEnv("TODOIST_CLIENT_ID");
   const clientSecret = getEnv("TODOIST_CLIENT_SECRET");
   const redirectUri = getEnv("TODOIST_REDIRECT_URI");
@@ -78,14 +85,11 @@ export async function GET(request: Request) {
 
   const tokenData = (await tokenResponse.json()) as { access_token: string };
 
+  await upsertOAuthToken(supabase, user.id, "todoist", tokenData.access_token);
+
   const origin = new URL(request.url).origin;
   const response = NextResponse.redirect(`${origin}/`);
-  response.cookies.set("todoist_access_token", tokenData.access_token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-  });
+  // Clear the CSRF state cookie
   response.cookies.set("oauth_state_todoist", "", {
     httpOnly: true,
     sameSite: "lax",

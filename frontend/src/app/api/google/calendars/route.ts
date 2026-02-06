@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
+import { getRouteUser } from "@/lib/supabase/route";
+import { getOAuthToken } from "@/lib/supabase/tokens";
 
-function getCookieValue(cookieHeader: string | null, name: string) {
-  return cookieHeader?.match(new RegExp(`${name}=([^;]+)`))?.[1];
-}
+export async function GET() {
+  const { supabase, user } = await getRouteUser();
+  if (!user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
 
-export async function GET(request: Request) {
-  const token = getCookieValue(request.headers.get("cookie"), "google_access_token");
+  const result = await getOAuthToken(supabase, user.id, "google");
+  const token = result?.access_token;
   if (!token) {
     return NextResponse.json({ error: "Missing Google token" }, { status: 401 });
   }
