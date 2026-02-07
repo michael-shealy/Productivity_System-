@@ -126,34 +126,45 @@ export async function deleteMorningFlow(
 // ── Focus3 ────────────────────────────────────────────────────────────
 
 type Focus3Item = { id: string; label: string; type: string };
+type Focus3Data = { items: Focus3Item[]; aiReasoning: string };
 
 export async function loadFocus3(
   supabase: SupabaseClient,
   userId: string,
   date: string
-): Promise<Focus3Item[] | null> {
-  const { data } = await supabase
+): Promise<Focus3Data | null> {
+  // Use maybeSingle() so 0 rows returns { data: null, error: null } instead of PGRST116
+  const { data, error } = await supabase
     .from("daily_focus3")
-    .select("items")
+    .select("items, ai_reasoning")
     .eq("user_id", userId)
     .eq("date", date)
-    .single();
+    .maybeSingle();
+
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'data.ts:loadFocus3',message:'loadFocus3 result',data:{hasData:!!data,errorCode:error?.code,errorMessage:error?.message,itemsLength:data?.items?.length},timestamp:Date.now(),hypothesisId:'H2',runId:'post-fix'})}).catch(()=>{});
+  // #endregion
 
   if (!data) return null;
-  return data.items as Focus3Item[];
+  return {
+    items: data.items as Focus3Item[],
+    aiReasoning: (data.ai_reasoning as string) ?? "",
+  };
 }
 
 export async function saveFocus3(
   supabase: SupabaseClient,
   userId: string,
   date: string,
-  items: Focus3Item[]
+  items: Focus3Item[],
+  aiReasoning?: string
 ) {
   await supabase.from("daily_focus3").upsert(
     {
       user_id: userId,
       date,
       items,
+      ai_reasoning: aiReasoning ?? "",
     },
     { onConflict: "user_id,date" }
   );

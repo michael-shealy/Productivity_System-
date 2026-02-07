@@ -35,6 +35,24 @@ export type AIBriefingResponse = {
   insights: AIInsightCard[];
 };
 
+// ── Focus 3 AI Types ──────────────────────────────────────────────────
+
+export type Focus3AIRequest = {
+  today: string;
+  weekday: string;
+  goals: Array<{ title: string; domain: string; description: string; season: string }>;
+  tasks: Array<{ id: string; title: string; priority: number; status: string }>;
+  events: Array<{ id: string; title: string; time: string }>;
+  habits: Array<{ id: string; title: string; activeStreak: number; adherencePercent: number; last7Sum: number; period: string }>;
+  identityMetrics: { morningGrounding: boolean; embodiedMovement: boolean; nutritionalAwareness: boolean; presentConnection: boolean; curiositySpark: boolean };
+  identityScore: number;
+};
+
+export type Focus3AIResponse = {
+  items: Array<{ id: string; label: string; type: string }>;
+  reasoning: string;
+};
+
 // ── Context Builder ────────────────────────────────────────────────────
 
 export function buildBriefingContext(opts: {

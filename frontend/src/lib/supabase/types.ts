@@ -77,6 +77,7 @@ export type DbDailyFocus3 = {
   user_id: string;
   date: string;
   items: Array<{ id: string; label: string; type: string }>;
+  ai_reasoning: string;
 };
 
 export type DbDailyAIBriefing = {
