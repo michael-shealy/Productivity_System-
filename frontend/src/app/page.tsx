@@ -15,7 +15,6 @@ import {
   deleteMorningFlow,
   loadFocus3,
   saveFocus3,
-  deleteFocus3,
   loadGoals,
   loadHabits,
   loadHabitSessions,
@@ -99,13 +98,14 @@ export default function Home() {
     presentConnection: false,
     curiositySpark: false,
   });
-  const [focus3Snapshot, setFocus3Snapshot] = useState<
-    Array<{ id: string; label: string; type: string }>
-  >([]);
-  const [focus3SnapshotDate, setFocus3SnapshotDate] = useState("");
-  const [focus3Editing, setFocus3Editing] = useState(false);
-  const [focus3Draft, setFocus3Draft] = useState<Array<{ label: string; type: string }>>([]);
-  const [focus3OverrideDate, setFocus3OverrideDate] = useState<string | null>(null);
+  const [focus3Status, setFocus3Status] = useState<"loading" | "proposing" | "submitted" | "editing">("loading");
+  const [focus3Items, setFocus3Items] = useState<Array<{ id: string; label: string; type: string }>>([]);
+  const [focus3Draft, setFocus3Draft] = useState<Array<{ id: string; label: string; type: string }>>([]);
+  const [focus3Reasoning, setFocus3Reasoning] = useState("");
+  const [focus3AiLoading, setFocus3AiLoading] = useState(false);
+  const [focus3AiError, setFocus3AiError] = useState<string | null>(null);
+  const [focus3DataLoaded, setFocus3DataLoaded] = useState(false);
+  const [focus3CustomInputs, setFocus3CustomInputs] = useState<Record<number, string>>({});
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [taskEditForm, setTaskEditForm] = useState({
     content: "",
@@ -187,10 +187,15 @@ export default function Home() {
         setMorningFlowStatus(flowData.status);
         setMorningFlowSteps(flowData.steps);
       }
-      if (focus3Data?.length) {
-        setFocus3Snapshot(focus3Data);
-        setFocus3OverrideDate(dateKey);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:init',message:'focus3 after load',data:{focus3DataNull:!focus3Data,itemsLength:focus3Data?.items?.length,settingSubmitted:!!(focus3Data?.items?.length)},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+      // #endregion
+      if (focus3Data?.items?.length) {
+        setFocus3Items(focus3Data.items);
+        setFocus3Reasoning(focus3Data.aiReasoning ?? "");
+        setFocus3Status("submitted");
       }
+      setFocus3DataLoaded(true);
     }
 
     init();
@@ -397,59 +402,6 @@ export default function Home() {
     });
   }, [todayEvents, calendarNameById]);
 
-  const focusAreas = [
-    {
-      id: "weight",
-      label: "Weight loss & nutrition",
-      keywords: [
-        "calorie",
-        "weight",
-        "run",
-        "meal",
-        "protein",
-        "gym",
-        "workout",
-        "exercise",
-        "walk",
-        "mobility",
-        "steps",
-      ],
-    },
-    {
-      id: "technical",
-      label: "Technical skills",
-      keywords: [
-        "python",
-        "causal",
-        "a/b",
-        "ab test",
-        "experiment",
-        "model",
-        "ml",
-        "ai",
-        "data",
-        "coding",
-        "vibe",
-        "project",
-      ],
-    },
-    {
-      id: "curiosity",
-      label: "Curiosity & learning",
-      keywords: ["read", "reading", "article", "newsletter", "book", "curiosity"],
-    },
-    {
-      id: "relationship",
-      label: "Relationship & connection",
-      keywords: ["wedding", "fiance", "fiancée", "date", "coffee", "family", "friend"],
-    },
-    {
-      id: "mba",
-      label: "graduate program engagement",
-      keywords: ["class", "case", "assignment", "mba", "lecture", "exam", "homework"],
-    },
-  ];
-
   const cleanFocusTitle = (title: string) => {
     let cleaned = title.replace(/\s*\(([^)]*)\)\s*/g, (match, inner) => {
       if (
@@ -499,105 +451,6 @@ export default function Home() {
     },
   ];
 
-  const inferFocusAreas = (title: string) => {
-    const lower = title.toLowerCase();
-    return focusAreas
-      .filter((area) => area.keywords.some((keyword) => lower.includes(keyword)))
-      .map((area) => area.id);
-  };
-
-  const focusCandidates = [
-    ...dueTodayTasks.map((task) => ({
-      id: `task-${task.id}`,
-      label: cleanFocusTitle(task.title),
-      type: task.status === "completed" ? "Completed task" : "Task",
-      status: task.status,
-      areas: inferFocusAreas(task.title),
-    })),
-    ...completedTodayTasks.map((task) => ({
-      id: `completed-${task.id}`,
-      label: cleanFocusTitle(task.title),
-      type: "Completed task",
-      status: task.status,
-      areas: inferFocusAreas(task.title),
-    })),
-    ...todayEvents.map((event) => ({
-      id: `event-${event.id}`,
-      label: cleanFocusTitle(event.title ?? "Untitled event"),
-      type: "Event",
-      areas: inferFocusAreas(event.title ?? ""),
-    })),
-  ];
-
-  const focusAreaCounts = focusCandidates.reduce<Record<string, number>>(
-    (acc, item) => {
-      item.areas.forEach((area) => {
-        acc[area] = (acc[area] ?? 0) + 1;
-      });
-      return acc;
-    },
-    {}
-  );
-
-  const selectFocus3 = () => {
-    if (!focusCandidates.length) {
-      return [
-        { id: "focus-1", label: "Morning grounding", type: "Identity" },
-        { id: "focus-2", label: "Embodied movement", type: "Identity" },
-        { id: "focus-3", label: "Curiosity spark", type: "Identity" },
-      ];
-    }
-    const seen = new Set<string>();
-    const uniqueCandidates = focusCandidates.filter((item) => {
-      const key = item.label.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-    const selections = uniqueCandidates.slice(0, 3).map((item) => ({
-      id: item.id,
-      label: item.label,
-      type: item.type,
-    }));
-    while (selections.length < 3) {
-      const fallbackId = selections.length + 1;
-      selections.push({
-        id: `focus-${fallbackId}`,
-        label:
-          fallbackId === 1
-            ? "Morning grounding"
-            : fallbackId === 2
-              ? "Embodied movement"
-              : "Curiosity spark",
-        type: "Identity",
-      });
-    }
-    return selections.slice(0, 3);
-  };
-
-  useEffect(() => {
-    const hasRealFocus = focus3Snapshot.some((item) => !item.id.startsWith("focus-"));
-    const uniqueCandidateCount = new Set(
-      focusCandidates.map((item) => item.label.toLowerCase())
-    ).size;
-    if (focus3OverrideDate === todayKey) {
-      return;
-    }
-    const shouldRefresh =
-      focus3SnapshotDate !== todayKey ||
-      (!hasRealFocus && focusCandidates.length > 0) ||
-      focus3Snapshot.length === 0 ||
-      (focus3Snapshot.length < 3 && uniqueCandidateCount >= 3);
-    if (shouldRefresh) {
-      setFocus3SnapshotDate(todayKey);
-      setFocus3Snapshot(selectFocus3());
-    }
-  }, [focusCandidates, focus3OverrideDate, focus3Snapshot, focus3SnapshotDate, todayKey]);
-
-  const focusThemes = focusAreas
-    .filter((area) => (focusAreaCounts[area.id] ?? 0) > 0)
-    .map((area) => area.label)
-    .slice(0, 3);
 
   const briefingCopy = (() => {
     const taskCount = dueTodayTasks.length + completedTodayTasks.length;
@@ -1529,6 +1382,158 @@ export default function Home() {
     return { viewDateCount };
   }, [habitStats, habitViewDateKey]);
 
+  // ── Focus 3 AI-driven options ───────────────────────────────────────
+  const focus3Options = useMemo(() => [
+    ...dueTodayTasks.map((t) => ({
+      id: `task-${t.id}`,
+      label: cleanFocusTitle(t.title),
+      type: "Task",
+      group: "Tasks",
+    })),
+    ...completedTodayTasks.map((t) => ({
+      id: `completed-${t.id}`,
+      label: cleanFocusTitle(t.title),
+      type: "Completed task",
+      group: "Tasks",
+    })),
+    ...todayAgendaEvents.map((e) => ({
+      id: `event-${e.id}`,
+      label: cleanFocusTitle(e.title ?? "Untitled event"),
+      type: "Event",
+      group: "Events",
+    })),
+    ...activeHabits.map((h) => ({
+      id: `habit-${h.id}`,
+      label: h.title,
+      type: "Habit",
+      group: "Habits",
+    })),
+    ...identityQuestions.map((q) => ({
+      id: `identity-${q.key}`,
+      label: q.helper,
+      type: "Identity",
+      group: "Identity",
+    })),
+  ], [dueTodayTasks, completedTodayTasks, todayAgendaEvents, activeHabits, identityQuestions]);
+
+  // Ref holds latest context so Focus 3 effect can read it without re-running when data updates (which would abort the request).
+  const focus3ContextRef = useRef({
+    todayKey,
+    userGoals,
+    dueTodayTasks,
+    completedTodayTasks,
+    todayAgendaEvents,
+    habitStats,
+    identityMetrics,
+    identityScore,
+  });
+  focus3ContextRef.current = {
+    todayKey,
+    userGoals,
+    dueTodayTasks,
+    completedTodayTasks,
+    todayAgendaEvents,
+    habitStats,
+    identityMetrics,
+    identityScore,
+  };
+  const focus3HasData =
+    dueTodayTasks.length > 0 || todayAgendaEvents.length > 0 || activeHabits.length > 0 || habitStats.length > 0;
+
+  // ── Focus 3 AI generation trigger ─────────────────────────────────
+  useEffect(() => {
+    const ctx = focus3ContextRef.current;
+    const hasData = ctx.dueTodayTasks.length > 0 || ctx.todayAgendaEvents.length > 0 || ctx.habitStats.length > 0;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:focus3Effect',message:'effect run',data:{focus3Status,focus3DataLoaded,focus3AiLoading,hasData,habitStatsLen:ctx.habitStats.length,dueToday:ctx.dueTodayTasks.length,todayEvents:ctx.todayAgendaEvents.length,willSkipGuard:!(focus3Status==='loading'&&focus3DataLoaded&&!focus3AiLoading),willSkipHasData:!hasData},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
+    if (focus3Status !== "loading" || !focus3DataLoaded || focus3AiLoading) return;
+    if (!hasData) return;
+
+    const abortController = new AbortController();
+    setFocus3AiLoading(true);
+    setFocus3AiError(null);
+
+    const weekday = new Date().toLocaleDateString("en-US", { weekday: "long" });
+    const formatEventTime = (event: CalendarEventContract) => {
+      if (!event.start?.dateTime) return "All day";
+      const d = new Date(event.start.dateTime);
+      if (Number.isNaN(d.getTime())) return "All day";
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    };
+
+    const requestBody = {
+      today: ctx.todayKey,
+      weekday,
+      goals: ctx.userGoals.map((g) => ({ title: g.title, domain: g.domain, description: g.description, season: g.season })),
+      tasks: [
+        ...ctx.dueTodayTasks.slice(0, 10).map((t) => ({ id: `task-${t.id}`, title: t.title, priority: t.priority, status: t.status ?? "active" })),
+        ...ctx.completedTodayTasks.slice(0, 5).map((t) => ({ id: `completed-${t.id}`, title: t.title, priority: t.priority, status: "completed" })),
+      ],
+      events: ctx.todayAgendaEvents.slice(0, 8).map((e) => ({ id: `event-${e.id}`, title: e.title ?? "Untitled", time: formatEventTime(e) })),
+      habits: ctx.habitStats.slice(0, 10).map((s) => ({
+        id: `habit-${s.habit.id}`,
+        title: s.habit.title,
+        activeStreak: s.activeStreak,
+        adherencePercent: s.adherenceLast365,
+        last7Sum: s.sumLast7,
+        period: s.habit.period,
+      })),
+      identityMetrics: ctx.identityMetrics,
+      identityScore: ctx.identityScore,
+    };
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:focus3Fetch',message:'calling API',data:{},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
+    fetch("/api/ai/focus3", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestBody),
+      signal: abortController.signal,
+    })
+      .then(async (res) => {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:focus3Response',message:'API response',data:{ok:res.ok,status:res.status},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+        // #endregion
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.detail ?? body.error ?? "AI Focus 3 generation failed");
+        }
+        return res.json();
+      })
+      .then((data: { items: Array<{ id: string; label: string; type: string }>; reasoning: string }) => {
+        if (abortController.signal.aborted) return;
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:focus3Success',message:'set proposing',data:{itemsLen:data?.items?.length},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
+        // #endregion
+        setFocus3Draft(data.items.length ? data.items : []);
+        setFocus3Reasoning(data.reasoning ?? "");
+        setFocus3Status("proposing");
+      })
+      .catch((err) => {
+        if (abortController.signal.aborted) return;
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:focus3Catch',message:'API error',data:{errMsg:err?.message},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+        // #endregion
+        setFocus3AiError(err instanceof Error ? err.message : "Failed to generate Focus 3");
+        // Fall back to manual mode — set proposing with empty draft
+        setFocus3Draft([
+          { id: "", label: "", type: "Focus" },
+          { id: "", label: "", type: "Focus" },
+          { id: "", label: "", type: "Focus" },
+        ]);
+        setFocus3Status("proposing");
+      })
+      .finally(() => {
+        if (!abortController.signal.aborted) setFocus3AiLoading(false);
+      });
+
+    return () => abortController.abort();
+    // Only re-run when ready state or data-availability changes; use focus3ContextRef for payload to avoid
+    // re-running (and aborting the request) when tasks/events/habits update.
+  }, [focus3Status, focus3DataLoaded, focus3HasData]);
+
   const aiBriefingContext = useMemo(() => {
     if (!habitStats.length && !dueTodayTasks.length && !todayAgendaEvents.length) {
       return null;
@@ -1540,8 +1545,8 @@ export default function Home() {
       todayAgendaEvents,
       habitStats,
       identityScore,
-      focusThemes,
-      focus3Snapshot,
+      focusThemes: [],
+      focus3Snapshot: focus3Status === "submitted" ? focus3Items : [],
       morningFlowStatus,
     });
   }, [
@@ -1551,8 +1556,8 @@ export default function Home() {
     completedTodayTasks,
     todayAgendaEvents,
     identityScore,
-    focusThemes,
-    focus3Snapshot,
+    focus3Status,
+    focus3Items,
     morningFlowStatus,
   ]);
 
@@ -1575,36 +1580,29 @@ export default function Home() {
     }
   };
 
-  const saveFocus3Override = () => {
-    const trimmed = focus3Draft
-      .map((item) => ({
-        label: item.label.trim(),
-        type: item.type.trim() || "Focus",
-      }))
-      .filter((item) => item.label.length > 0)
-      .slice(0, 3);
-    while (trimmed.length < 3) {
-      trimmed.push({ label: "Focus anchor", type: "Identity" });
+  const saveFocus3Submit = () => {
+    // Resolve custom inputs: if a draft item has id="" (custom), assign a manual id
+    const resolvedItems = focus3Draft.map((item, index) => {
+      if (item.id === "custom" || item.id === "") {
+        const customLabel = focus3CustomInputs[index]?.trim() || item.label.trim() || "Focus anchor";
+        return { id: `custom-${index + 1}-${todayKey}`, label: customLabel, type: "Custom" };
+      }
+      return item;
+    }).slice(0, 3);
+    while (resolvedItems.length < 3) {
+      resolvedItems.push({ id: `custom-${resolvedItems.length + 1}-${todayKey}`, label: "Focus anchor", type: "Identity" });
     }
-    const nextItems = trimmed.map((item, index) => ({
-      id: `manual-${index + 1}-${todayKey}`,
-      label: item.label,
-      type: item.type,
-    }));
-    setFocus3Snapshot(nextItems);
-    setFocus3OverrideDate(todayKey);
+    setFocus3Items(resolvedItems);
+    setFocus3Status("submitted");
+    setFocus3CustomInputs({});
     if (user && supabase) {
-      saveFocus3(supabase, user.id, todayKey, nextItems).catch(() => {});
+      saveFocus3(supabase, user.id, todayKey, resolvedItems, focus3Reasoning).catch(() => {});
     }
-    setFocus3Editing(false);
   };
 
-  const resetFocus3Override = () => {
-    setFocus3OverrideDate(null);
-    setFocus3SnapshotDate("");
-    if (user && supabase) {
-      deleteFocus3(supabase, user.id, todayKey).catch(() => {});
-    }
+  const editFocus3 = () => {
+    setFocus3Draft([...focus3Items]);
+    setFocus3Status("editing");
   };
 
   const scrollToSection = (id: string) => {
@@ -1653,16 +1651,8 @@ export default function Home() {
         });
       }
     }
-    if (focusThemes.length > 0) {
-      items.push({
-        id: "focus-themes",
-        title: "Let one focus area lead today",
-        body: "Pick one practice that matches the season you are in.",
-        why: [`Recent focus themes: ${focusThemes.join(", ")}.`],
-      });
-    }
     return items.slice(0, 4);
-  }, [focusThemes, habitSummary.total, habitSummary.weekCount, identityScore, morningFlowStatus]);
+  }, [habitSummary.total, habitSummary.weekCount, identityScore, morningFlowStatus]);
 
   const logHabitForDate = useCallback(
     async (habitId: string, dateKey: string, amountOverride?: number) => {
@@ -1742,18 +1732,18 @@ export default function Home() {
   const removeLatestHabitSessionForDate = useCallback(
     async (habitId: string, dateKey: string) => {
       if (!supabase || !user) return;
-      let latestSession: HabitSession | null = null;
+      let latestSession: HabitSession | undefined;
       let latestTime = 0;
-      habitSessions.forEach((session) => {
-        if (session.habitId !== habitId) return;
+      for (const session of habitSessions) {
+        if (session.habitId !== habitId) continue;
         const parsed = new Date(session.createdAt);
-        if (Number.isNaN(parsed.getTime())) return;
-        if (toDateKey(parsed) !== dateKey) return;
+        if (Number.isNaN(parsed.getTime())) continue;
+        if (toDateKey(parsed) !== dateKey) continue;
         if (parsed.getTime() >= latestTime) {
           latestTime = parsed.getTime();
           latestSession = session;
         }
-      });
+      }
       if (!latestSession) {
         setHabitError("No log to undo for this day.");
         return;
@@ -1766,7 +1756,8 @@ export default function Home() {
         setHabitError("Failed to remove habit log.");
         return;
       }
-      setHabitSessions((prev) => prev.filter((s) => s.id !== latestSession!.id));
+      const removedId = latestSession.id;
+      setHabitSessions((prev) => prev.filter((s) => s.id !== removedId));
     },
     [supabase, user, habitSessions]
   );
@@ -2186,111 +2177,167 @@ export default function Home() {
                   <div>
                     <h2 className="text-lg font-semibold">Focus 3</h2>
                     <p className="text-sm text-zinc-300">
-                      Choose what matters most today, not what is loudest.
+                      {focus3AiLoading
+                        ? "AI is selecting your Focus 3..."
+                        : focus3Status === "proposing"
+                          ? "AI suggested your Focus 3. Review and submit."
+                          : "Choose what matters most today, not what is loudest."}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    {!focus3Editing && (
+                    {focus3Status === "submitted" && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setFocus3Draft(
-                            (focus3Snapshot.length ? focus3Snapshot : selectFocus3()).map(
-                              (item) => ({ label: item.label, type: item.type })
-                            )
-                          );
-                          setFocus3Editing(true);
-                        }}
+                        onClick={editFocus3}
                         className="rounded-full border border-emerald-700/60 px-3 py-1 text-xs text-emerald-200 hover:text-white"
                       >
-                        Edit focus 3
-                      </button>
-                    )}
-                    {!focus3Editing && focus3OverrideDate === todayKey && (
-                      <button
-                        type="button"
-                        onClick={resetFocus3Override}
-                        className="rounded-full border border-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:text-white"
-                      >
-                        Reset to auto
+                        Edit
                       </button>
                     )}
                   </div>
                 </div>
-                {focus3Editing ? (
-                  <div className="mt-3 space-y-2 text-sm text-zinc-200">
-                    {[0, 1, 2].map((index) => (
-                      <div
-                        key={`focus3-edit-${index}`}
-                        className="rounded-lg border border-emerald-900/50 bg-emerald-500/10 px-3 py-2"
-                      >
-                        <div className="grid gap-2 sm:grid-cols-[2fr_1fr]">
-                          <input
-                            className="w-full rounded-lg border border-emerald-900/50 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                            placeholder={`Focus ${index + 1}`}
-                            value={focus3Draft[index]?.label ?? ""}
-                            onChange={(event) =>
-                              setFocus3Draft((prev) => {
-                                const next = [...prev];
-                                next[index] = {
-                                  label: event.target.value,
-                                  type: next[index]?.type ?? "Focus",
-                                };
-                                return next;
-                              })
-                            }
-                          />
-                          <input
-                            className="w-full rounded-lg border border-emerald-900/50 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                            placeholder="Type (e.g., Task, Identity)"
-                            value={focus3Draft[index]?.type ?? ""}
-                            onChange={(event) =>
-                              setFocus3Draft((prev) => {
-                                const next = [...prev];
-                                next[index] = {
-                                  label: next[index]?.label ?? "",
-                                  type: event.target.value,
-                                };
-                                return next;
-                              })
-                            }
-                          />
-                        </div>
-                      </div>
+
+                {/* Loading / AI generating state */}
+                {(focus3Status === "loading" || focus3AiLoading) && (
+                  <div className="mt-4 space-y-2">
+                    {[0, 1, 2].map((i) => (
+                      <div key={`skeleton-${i}`} className="h-10 animate-pulse rounded-lg bg-emerald-500/10 border border-emerald-900/30" />
                     ))}
+                  </div>
+                )}
+
+                {/* AI error message */}
+                {focus3AiError && (
+                  <p className="mt-2 text-xs text-amber-400">{focus3AiError} — pick your Focus 3 manually below.</p>
+                )}
+
+                {/* Proposing / Editing state — dropdown UI */}
+                {(focus3Status === "proposing" || focus3Status === "editing") && !focus3AiLoading && (
+                  <div className="mt-3 space-y-2 text-sm text-zinc-200">
+                    {focus3Reasoning && focus3Status === "proposing" && (
+                      <p className="text-xs text-emerald-300/80 italic mb-2">{focus3Reasoning}</p>
+                    )}
+                    {[0, 1, 2].map((index) => {
+                      const currentVal = focus3Draft[index]?.id ?? "";
+                      const isCustom = currentVal === "custom";
+                      return (
+                        <div
+                          key={`focus3-slot-${index}`}
+                          className="rounded-lg border border-emerald-900/50 bg-emerald-500/10 px-3 py-2"
+                        >
+                          <select
+                            className="w-full rounded-lg border border-emerald-900/50 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
+                            value={currentVal}
+                            onChange={(e) => {
+                              const selectedId = e.target.value;
+                              if (selectedId === "custom") {
+                                setFocus3Draft((prev) => {
+                                  const next = [...prev];
+                                  next[index] = { id: "custom", label: "", type: "Custom" };
+                                  return next;
+                                });
+                              } else {
+                                const opt = focus3Options.find((o) => o.id === selectedId);
+                                if (opt) {
+                                  setFocus3Draft((prev) => {
+                                    const next = [...prev];
+                                    next[index] = { id: opt.id, label: opt.label, type: opt.type };
+                                    return next;
+                                  });
+                                }
+                              }
+                            }}
+                          >
+                            <option value="">-- Select focus {index + 1} --</option>
+                            {(() => {
+                              const groups = ["Tasks", "Events", "Habits", "Identity"];
+                              return groups.map((group) => {
+                                const groupItems = focus3Options.filter((o) => o.group === group);
+                                if (!groupItems.length) return null;
+                                return (
+                                  <optgroup key={group} label={group}>
+                                    {groupItems.map((o) => (
+                                      <option key={o.id} value={o.id}>{o.label}</option>
+                                    ))}
+                                  </optgroup>
+                                );
+                              });
+                            })()}
+                            <option value="custom">Custom...</option>
+                          </select>
+                          {isCustom && (
+                            <input
+                              className="mt-2 w-full rounded-lg border border-emerald-900/50 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
+                              placeholder="Type your focus item..."
+                              value={focus3CustomInputs[index] ?? ""}
+                              onChange={(e) =>
+                                setFocus3CustomInputs((prev) => ({ ...prev, [index]: e.target.value }))
+                              }
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={saveFocus3Override}
+                        onClick={saveFocus3Submit}
                         className="rounded-full bg-emerald-500 px-4 py-2 text-xs font-medium text-white hover:bg-emerald-400"
                       >
-                        Save focus 3
+                        {focus3Status === "editing" ? "Save changes" : "Submit Focus 3"}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setFocus3Editing(false)}
-                        className="rounded-full border border-zinc-800 px-4 py-2 text-xs text-zinc-300 hover:text-white"
-                      >
-                        Cancel
-                      </button>
+                      {focus3Status === "editing" && (
+                        <button
+                          type="button"
+                          onClick={() => setFocus3Status("submitted")}
+                          className="rounded-full border border-zinc-800 px-4 py-2 text-xs text-zinc-300 hover:text-white"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      {focus3Status === "proposing" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFocus3Draft([
+                              { id: "", label: "", type: "Focus" },
+                              { id: "", label: "", type: "Focus" },
+                              { id: "", label: "", type: "Focus" },
+                            ]);
+                            setFocus3Reasoning("");
+                            setFocus3CustomInputs({});
+                          }}
+                          className="text-xs text-zinc-400 hover:text-zinc-200 underline"
+                        >
+                          Start from scratch
+                        </button>
+                      )}
                     </div>
                   </div>
-                ) : (
-                  <ul className="mt-3 space-y-2 text-sm text-zinc-200">
-                    {focus3Snapshot.map((item) => (
-                      <li
-                        key={item.id}
-                        className="rounded-lg border border-emerald-900/50 bg-emerald-500/10 px-3 py-2"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium">{item.label}</span>
-                          <span className="text-[11px] text-emerald-300">
-                            {item.type}
-                          </span>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
+                )}
+
+                {/* Submitted state — locked items */}
+                {focus3Status === "submitted" && (
+                  <>
+                    <ul className="mt-3 space-y-2 text-sm text-zinc-200">
+                      {focus3Items.map((item) => (
+                        <li
+                          key={item.id}
+                          className="rounded-lg border border-emerald-900/50 bg-emerald-500/10 px-3 py-2"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium">{item.label}</span>
+                            <span className="text-[11px] text-emerald-300">
+                              {item.type}
+                            </span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                    {focus3Reasoning && (
+                      <p className="mt-2 text-xs text-zinc-400 italic">{focus3Reasoning}</p>
+                    )}
+                  </>
                 )}
               </div>
             </section>
