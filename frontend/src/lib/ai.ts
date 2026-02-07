@@ -3,6 +3,14 @@ import type { Goal } from "@/lib/goals";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
+export type LatestReflectionForAI = {
+  weekStartDate: string;
+  whatWentWell: string;
+  whatMattered: string;
+  learnings: string;
+  capabilityGrowth: boolean | null;
+};
+
 export type AIBriefingRequest = {
   today: string;
   goals: Array<{ id: string; title: string; domain: string; season: string }>;
@@ -19,6 +27,8 @@ export type AIBriefingRequest = {
   focusThemes: string[];
   focus3: Array<{ label: string; type: string }>;
   morningFlowStatus: string;
+  latestReflection?: LatestReflectionForAI;
+  aiTone?: "standard" | "gentle";
 };
 
 export type AIInsightCard = {
@@ -46,6 +56,8 @@ export type Focus3AIRequest = {
   habits: Array<{ id: string; title: string; activeStreak: number; adherencePercent: number; last7Sum: number; period: string }>;
   identityMetrics: { morningGrounding: boolean; embodiedMovement: boolean; nutritionalAwareness: boolean; presentConnection: boolean; curiositySpark: boolean };
   identityScore: number;
+  latestReflection?: LatestReflectionForAI;
+  aiTone?: "standard" | "gentle";
 };
 
 export type Focus3AIResponse = {
@@ -70,6 +82,8 @@ export function buildBriefingContext(opts: {
   focusThemes: string[];
   focus3Snapshot: Array<{ label: string; type: string }>;
   morningFlowStatus: string;
+  latestReflection?: LatestReflectionForAI;
+  aiTone?: "standard" | "gentle";
 }): AIBriefingRequest {
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
@@ -119,6 +133,8 @@ export function buildBriefingContext(opts: {
       type: f.type,
     })),
     morningFlowStatus: opts.morningFlowStatus,
+    latestReflection: opts.latestReflection,
+    aiTone: opts.aiTone,
   };
 }
 
