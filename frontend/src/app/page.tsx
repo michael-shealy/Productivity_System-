@@ -19,6 +19,9 @@ import {
   loadGoals,
   loadHabits,
   loadHabitSessions,
+  insertHabitSession,
+  updateHabitSession,
+  deleteHabitSession,
 } from "@/lib/supabase/data";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 
@@ -32,6 +35,7 @@ export default function Home() {
   const [habits, setHabits] = useState<Habit[]>([]);
   const [habitSessions, setHabitSessions] = useState<HabitSession[]>([]);
   const [habitLoading, setHabitLoading] = useState(false);
+  const [habitSaving, setHabitSaving] = useState(false);
   const [habitError, setHabitError] = useState<string | null>(null);
   const [, setHabitSource] = useState("export_1770248675244");
   const [expandedHabitId, setExpandedHabitId] = useState<string | null>(null);
@@ -53,6 +57,14 @@ export default function Home() {
   >({});
   const [habitSeriesPageByHabit, setHabitSeriesPageByHabit] = useState<
     Record<string, number>
+  >({});
+  const [habitViewDateKey, setHabitViewDateKey] = useState<string>(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [sessionEditInputs, setSessionEditInputs] = useState<
+    Record<string, { amount: string; note: string }>
   >({});
   const [morningFlowStatus, setMorningFlowStatus] = useState<
     "idle" | "in_progress" | "complete"
@@ -1149,9 +1161,10 @@ export default function Home() {
     [habits]
   );
 
+  // Last 7 days excluding today (complete days only for historic metrics)
   const last7Days = useMemo(() => {
     const days: string[] = [];
-    for (let i = 6; i >= 0; i -= 1) {
+    for (let i = 1; i <= 7; i += 1) {
       const date = new Date();
       date.setDate(date.getDate() - i);
       days.push(toDateKey(date));
@@ -1227,6 +1240,9 @@ export default function Home() {
       startDate.setHours(0, 0, 0, 0);
       const todayDate = new Date();
       todayDate.setHours(0, 0, 0, 0);
+      const yesterdayDate = new Date(todayDate);
+      yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+      const yesterdayKey = toDateKey(yesterdayDate);
 
       const countDaysBetween = (start: Date, end: Date) => {
         const diff = end.getTime() - start.getTime();
@@ -1270,16 +1286,32 @@ export default function Home() {
       const successMonthsCount = successMonths.size;
       const successYearsCount = successYears.size;
 
+      // Historic metrics exclude today (day may not be complete yet)
+      const successDaysExcludingToday = Array.from(successDayKeys).filter(
+        (key) => key <= yesterdayKey
+      ).length;
+      const successWeeksExcludingCurrent = Array.from(successWeekKeys).filter(
+        (key) => {
+          const weekStart = new Date(`${key}T00:00:00`);
+          if (Number.isNaN(weekStart.getTime())) return false;
+          const weekEnd = new Date(weekStart);
+          weekEnd.setDate(weekEnd.getDate() + 6);
+          return weekEnd <= yesterdayDate;
+        }
+      ).length;
+
       const totalPeriods = isDaily
-        ? countDaysBetween(startDate, todayDate)
-        : countWeeksBetween(startDate, todayDate);
-      const successPeriods = isDaily ? successDaysCount : successWeeksCount;
+        ? countDaysBetween(startDate, yesterdayDate)
+        : countWeeksBetween(startDate, yesterdayDate);
+      const successPeriods = isDaily
+        ? successDaysExcludingToday
+        : successWeeksExcludingCurrent;
       const adherencePercent =
         totalPeriods > 0 ? Math.round((successPeriods / totalPeriods) * 100) : 0;
 
-      const last365Start = new Date(todayDate);
+      const last365Start = new Date(yesterdayDate);
       last365Start.setDate(last365Start.getDate() - 364);
-      const currentYearStart = new Date(todayDate.getFullYear(), 0, 1);
+      const currentYearStart = new Date(yesterdayDate.getFullYear(), 0, 1);
 
       const countSuccessInRange = (
         keys: Set<string>,
@@ -1300,36 +1332,48 @@ export default function Home() {
       const totalLast365 = isDaily
         ? countDaysBetween(
             startDate > last365Start ? startDate : last365Start,
-            todayDate
+            yesterdayDate
           )
         : countWeeksBetween(
             startDate > last365Start ? startDate : last365Start,
-            todayDate
+            yesterdayDate
           );
       const totalCurrentYear = isDaily
         ? countDaysBetween(
             startDate > currentYearStart ? startDate : currentYearStart,
-            todayDate
+            yesterdayDate
           )
         : countWeeksBetween(
             startDate > currentYearStart ? startDate : currentYearStart,
-            todayDate
+            yesterdayDate
           );
 
       const successLast365 = isDaily
-        ? countSuccessInRange(successDayKeys, last365Start, todayDate)
-        : countSuccessInRange(
-            successWeekKeys,
-            new Date(getWeekStartKey(last365Start) + "T00:00:00"),
-            todayDate
-          );
+        ? countSuccessInRange(successDayKeys, last365Start, yesterdayDate)
+        : (() => {
+            let n = 0;
+            successWeekKeys.forEach((key) => {
+              const weekStart = new Date(`${key}T00:00:00`);
+              if (Number.isNaN(weekStart.getTime())) return;
+              const weekEnd = new Date(weekStart);
+              weekEnd.setDate(weekEnd.getDate() + 6);
+              if (weekEnd >= last365Start && weekEnd <= yesterdayDate) n += 1;
+            });
+            return n;
+          })();
       const successCurrentYear = isDaily
-        ? countSuccessInRange(successDayKeys, currentYearStart, todayDate)
-        : countSuccessInRange(
-            successWeekKeys,
-            new Date(getWeekStartKey(currentYearStart) + "T00:00:00"),
-            todayDate
-          );
+        ? countSuccessInRange(successDayKeys, currentYearStart, yesterdayDate)
+        : (() => {
+            let n = 0;
+            successWeekKeys.forEach((key) => {
+              const weekStart = new Date(`${key}T00:00:00`);
+              if (Number.isNaN(weekStart.getTime())) return;
+              const weekEnd = new Date(weekStart);
+              weekEnd.setDate(weekEnd.getDate() + 6);
+              if (weekEnd >= currentYearStart && weekEnd <= yesterdayDate) n += 1;
+            });
+            return n;
+          })();
 
       const adherenceLast365 =
         totalLast365 > 0 ? Math.round((successLast365 / totalLast365) * 100) : 0;
@@ -1478,6 +1522,13 @@ export default function Home() {
     };
   }, [habitStats]);
 
+  const habitSummaryForViewDate = useMemo(() => {
+    const viewDateCount = habitStats.filter((stat) =>
+      stat.totalsByDay.has(habitViewDateKey)
+    ).length;
+    return { viewDateCount };
+  }, [habitStats, habitViewDateKey]);
+
   const aiBriefingContext = useMemo(() => {
     if (!habitStats.length && !dueTodayTasks.length && !todayAgendaEvents.length) {
       return null;
@@ -1613,85 +1664,163 @@ export default function Home() {
     return items.slice(0, 4);
   }, [focusThemes, habitSummary.total, habitSummary.weekCount, identityScore, morningFlowStatus]);
 
-  const logHabitForToday = (habitId: string, amountOverride?: number) => {
-    const habit = habits.find((item) => item.id === habitId);
-    if (!habit) {
-      setHabitError("Habit not found.");
-      return;
-    }
-    if (habit.kind === "check") {
-      const todayKeyCheck = toDateKey(new Date());
-      const alreadyLogged = habitSessions.some((session) => {
-        if (session.habitId !== habit.id) return false;
-        const parsed = new Date(session.createdAt);
-        if (Number.isNaN(parsed.getTime())) return false;
-        return toDateKey(parsed) === todayKeyCheck;
-      });
-      if (alreadyLogged) {
-        setHabitError("This habit is already logged for today.");
+  const logHabitForDate = useCallback(
+    async (habitId: string, dateKey: string, amountOverride?: number) => {
+      if (!supabase || !user) return;
+      if (dateKey > todayKey) {
+        setHabitError("Cannot log for a future date.");
         return;
       }
-    }
-    const input = habitLogInputs[habit.id] ?? { amount: "", note: "" };
-    const amount =
-      typeof amountOverride === "number"
-        ? amountOverride
-        : habit.kind === "amount"
-          ? Number.parseFloat(input.amount || "0")
-          : 1;
-    if (
-      habit.kind === "amount" &&
-      amountOverride === undefined &&
-      (Number.isNaN(amount) || amount <= 0)
-    ) {
-      setHabitError("Enter a valid amount.");
-      return;
-    }
-    if (habit.kind === "amount" && amountOverride !== undefined && amount === 0) {
-      setHabitError("Amount cannot be zero.");
-      return;
-    }
-    const nowIso = new Date().toISOString();
-    const newSession: HabitSession = {
-      id: `local-${Date.now()}`,
-      habitId: habit.id,
-      duration: null,
-      amount: habit.kind === "amount" ? amount : 1,
-      data: input.note.trim() || null,
-      createdAt: nowIso,
-      finishedAt: nowIso,
-    };
-    const nextSessions = [newSession, ...habitSessions];
-    setHabitSessions(nextSessions);
-    setHabitLogInputs((prev) => ({
-      ...prev,
-      [habit.id]: { amount: "", note: "" },
-    }));
-    setHabitError(null);
-  };
-
-  const removeLatestHabitSessionForToday = (habitId: string) => {
-    const todayKeyCheck = toDateKey(new Date());
-    let latestIndex = -1;
-    let latestTime = 0;
-    habitSessions.forEach((session, index) => {
-      if (session.habitId !== habitId) return;
-      const parsed = new Date(session.createdAt);
-      if (Number.isNaN(parsed.getTime())) return;
-      if (toDateKey(parsed) !== todayKeyCheck) return;
-      if (parsed.getTime() >= latestTime) {
-        latestTime = parsed.getTime();
-        latestIndex = index;
+      const habit = habits.find((item) => item.id === habitId);
+      if (!habit) {
+        setHabitError("Habit not found.");
+        return;
       }
-    });
-    if (latestIndex === -1) {
-      setHabitError("No log to undo for today.");
-      return;
-    }
-    const nextSessions = habitSessions.filter((_, index) => index !== latestIndex);
-    setHabitSessions(nextSessions);
-    setHabitError(null);
-  };
+      if (habit.kind === "check") {
+        const alreadyLogged = habitSessions.some((session) => {
+          if (session.habitId !== habit.id) return false;
+          const parsed = new Date(session.createdAt);
+          if (Number.isNaN(parsed.getTime())) return false;
+          return toDateKey(parsed) === dateKey;
+        });
+        if (alreadyLogged) {
+          setHabitError("This habit is already logged for this day.");
+          return;
+        }
+      }
+      const input = habitLogInputs[habit.id] ?? { amount: "", note: "" };
+      const amount =
+        typeof amountOverride === "number"
+          ? amountOverride
+          : habit.kind === "amount"
+            ? Number.parseFloat(input.amount || "0")
+            : 1;
+      if (
+        habit.kind === "amount" &&
+        amountOverride === undefined &&
+        (Number.isNaN(amount) || amount <= 0)
+      ) {
+        setHabitError("Enter a valid amount.");
+        return;
+      }
+      if (habit.kind === "amount" && amountOverride !== undefined && amount === 0) {
+        setHabitError("Amount cannot be zero.");
+        return;
+      }
+      const noonIso = new Date(dateKey + "T12:00:00").toISOString();
+      setHabitSaving(true);
+      setHabitError(null);
+      const inserted = await insertHabitSession(supabase, user.id, {
+        habitId: habit.id,
+        duration: null,
+        amount: habit.kind === "amount" ? amount : 1,
+        data: input.note.trim() || null,
+        createdAt: noonIso,
+        finishedAt: noonIso,
+      });
+      setHabitSaving(false);
+      if (!inserted) {
+        setHabitError("Failed to save habit log.");
+        return;
+      }
+      setHabitSessions((prev) => [inserted, ...prev]);
+      setHabitLogInputs((prev) => ({
+        ...prev,
+        [habit.id]: { amount: "", note: "" },
+      }));
+    },
+    [
+      supabase,
+      user,
+      todayKey,
+      habits,
+      habitSessions,
+      habitLogInputs,
+    ]
+  );
+
+  const removeLatestHabitSessionForDate = useCallback(
+    async (habitId: string, dateKey: string) => {
+      if (!supabase || !user) return;
+      let latestSession: HabitSession | null = null;
+      let latestTime = 0;
+      habitSessions.forEach((session) => {
+        if (session.habitId !== habitId) return;
+        const parsed = new Date(session.createdAt);
+        if (Number.isNaN(parsed.getTime())) return;
+        if (toDateKey(parsed) !== dateKey) return;
+        if (parsed.getTime() >= latestTime) {
+          latestTime = parsed.getTime();
+          latestSession = session;
+        }
+      });
+      if (!latestSession) {
+        setHabitError("No log to undo for this day.");
+        return;
+      }
+      setHabitSaving(true);
+      setHabitError(null);
+      const ok = await deleteHabitSession(supabase, user.id, latestSession.id);
+      setHabitSaving(false);
+      if (!ok) {
+        setHabitError("Failed to remove habit log.");
+        return;
+      }
+      setHabitSessions((prev) => prev.filter((s) => s.id !== latestSession!.id));
+    },
+    [supabase, user, habitSessions]
+  );
+
+  const removeHabitSessionById = useCallback(
+    async (sessionId: string) => {
+      if (!supabase || !user) return;
+      setHabitSaving(true);
+      setHabitError(null);
+      const ok = await deleteHabitSession(supabase, user.id, sessionId);
+      setHabitSaving(false);
+      if (!ok) {
+        setHabitError("Failed to remove habit log.");
+        return;
+      }
+      setHabitSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      setEditingSessionId((id) => (id === sessionId ? null : id));
+    },
+    [supabase, user]
+  );
+
+  const saveSessionEdit = useCallback(
+    async (sessionId: string) => {
+      if (!supabase || !user) return;
+      const input = sessionEditInputs[sessionId];
+      if (!input) return;
+      const session = habitSessions.find((s) => s.id === sessionId);
+      const habit = habits.find((h) => h.id === session?.habitId);
+      const isAmount = habit?.kind === "amount";
+      if (isAmount) {
+        const amount = Number.parseFloat(input.amount);
+        if (Number.isNaN(amount) || amount < 0) {
+          setHabitError("Enter a valid amount.");
+          return;
+        }
+      }
+      setHabitSaving(true);
+      setHabitError(null);
+      const updated = await updateHabitSession(supabase, user.id, sessionId, {
+        ...(isAmount ? { amount: Number.parseFloat(input.amount) } : {}),
+        data: input.note.trim() || null,
+      });
+      setHabitSaving(false);
+      if (!updated) {
+        setHabitError("Failed to update habit log.");
+        return;
+      }
+      setHabitSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? updated : s))
+      );
+      setEditingSessionId(null);
+    },
+    [supabase, user, sessionEditInputs, habitSessions, habits]
+  );
 
   const saveHabitEdits = (habitId: string) => {
     const input = habitEditInputs[habitId];
@@ -2284,13 +2413,78 @@ export default function Home() {
               {habitError && (
                 <p className="mt-2 text-xs text-rose-400">{habitError}</p>
               )}
+              <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                  Viewing
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date(habitViewDateKey + "T12:00:00");
+                      d.setDate(d.getDate() - 1);
+                      setHabitViewDateKey(
+                        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+                      );
+                      setHabitError(null);
+                    }}
+                    className="rounded border border-zinc-600 bg-zinc-800/80 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-700"
+                    aria-label="Previous day"
+                  >
+                    ←
+                  </button>
+                  <span className="min-w-[8rem] text-center text-sm text-zinc-200">
+                    {habitViewDateKey === todayKey
+                      ? "Today"
+                      : new Date(habitViewDateKey + "T12:00:00").toLocaleDateString(
+                          [],
+                          {
+                            weekday: "short",
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          }
+                        )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date(habitViewDateKey + "T12:00:00");
+                      d.setDate(d.getDate() + 1);
+                      setHabitViewDateKey(
+                        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+                      );
+                      setHabitError(null);
+                    }}
+                    disabled={habitViewDateKey >= todayKey}
+                    className="rounded border border-zinc-600 bg-zinc-800/80 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-700 disabled:opacity-50 disabled:hover:bg-zinc-800/80"
+                    aria-label="Next day"
+                  >
+                    →
+                  </button>
+                </div>
+                {habitViewDateKey !== todayKey && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHabitViewDateKey(todayKey);
+                      setHabitError(null);
+                    }}
+                    className="rounded bg-amber-500/20 px-2 py-1 text-xs font-medium text-amber-200 hover:bg-amber-500/30"
+                  >
+                    Today
+                  </button>
+                )}
+              </div>
               <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-3 text-xs text-zinc-200">
                 <div className="flex items-center justify-between">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
                     Overall habit momentum
                   </p>
                   <span className="text-[11px] text-zinc-400">
-                    Today {habitSummary.todayCount}/{habitSummary.total}
+                    {habitViewDateKey === todayKey
+                      ? `Today ${habitSummaryForViewDate.viewDateCount}/${habitSummary.total}`
+                      : `${new Date(habitViewDateKey + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric" })} ${habitSummaryForViewDate.viewDateCount}/${habitSummary.total}`}
                   </span>
                 </div>
                 <div className="mt-2 h-2 w-full rounded-full bg-zinc-900/70">
@@ -2299,7 +2493,7 @@ export default function Home() {
                     style={{
                       width: habitSummary.total
                         ? `${Math.round(
-                            (habitSummary.todayCount / habitSummary.total) * 100
+                            (habitSummaryForViewDate.viewDateCount / habitSummary.total) * 100
                           )}%`
                         : "0%",
                     }}
@@ -2392,6 +2586,14 @@ export default function Home() {
                   }) => {
                     const isExpanded = expandedHabitId === habit.id;
                     const habitStyle = getHabitStyle(habit.id);
+                    const targetForDay = habit.kind === "amount" ? (habit.count || 1) : 1;
+                    const targetForWeek = habit.count || 1;
+                    const viewDateWeekKey = getWeekStartKey(
+                      new Date(habitViewDateKey + "T12:00:00")
+                    );
+                    const viewDateGoalMet = isDaily
+                      ? (totalsByDay.get(habitViewDateKey) ?? 0) >= targetForDay
+                      : (totalsByWeek.get(viewDateWeekKey) ?? 0) >= targetForWeek;
                     const pageSize = 8;
                     const viewKey = `${habit.id}-${habitDetailView}`;
                     const pageIndex = habitSeriesPageByHabit[viewKey] ?? 0;
@@ -2427,11 +2629,43 @@ export default function Home() {
                           }
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <p className="font-medium">{habit.title}</p>
-                              <p className="text-xs text-amber-100/80">
-                                Goal: {habit.count} · {habit.period}
-                              </p>
+                            <div className="flex items-start gap-2 min-w-0">
+                              {viewDateGoalMet && (
+                                <span
+                                  className="mt-0.5 shrink-0 rounded-full bg-emerald-500/20 text-emerald-400"
+                                  role="img"
+                                  aria-label={
+                                    isDaily
+                                      ? "Goal met for this day"
+                                      : "Goal met for this week"
+                                  }
+                                  title={
+                                    isDaily
+                                      ? "Goal met for this day"
+                                      : "Goal met for this week"
+                                  }
+                                >
+                                  <svg
+                                    className="h-5 w-5"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      strokeWidth={2}
+                                      d="M5 13l4 4L19 7"
+                                    />
+                                  </svg>
+                                </span>
+                              )}
+                              <div className="min-w-0">
+                                <p className="font-medium">{habit.title}</p>
+                                <p className="text-xs text-amber-100/80">
+                                  Goal: {habit.count} · {habit.period}
+                                </p>
+                              </div>
                             </div>
                             <div className="text-right text-[11px] text-amber-200">
                               <p>
@@ -2462,12 +2696,13 @@ export default function Home() {
                         <div className={`mt-3 rounded-lg border bg-zinc-950/40 px-3 py-2 text-xs text-zinc-200 ${habitStyle.card}`}>
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <p className="text-[11px] font-semibold text-zinc-200/80">
-                              Log today
+                              {habitViewDateKey === todayKey ? "Log today" : "Log for this day"}
                             </p>
                             <button
                               type="button"
-                                onClick={() => logHabitForToday(habit.id)}
-                                className={`rounded-full px-3 py-1 text-[11px] font-medium text-white ${habitStyle.bar}`}
+                              onClick={() => logHabitForDate(habit.id, habitViewDateKey)}
+                              disabled={habitSaving || habitViewDateKey > todayKey}
+                              className={`rounded-full px-3 py-1 text-[11px] font-medium text-white ${habitStyle.bar}`}
                             >
                               Log
                             </button>
@@ -2478,8 +2713,9 @@ export default function Home() {
                                 <div className="flex items-center gap-2">
                                   <button
                                     type="button"
-                                    className="rounded-full border border-zinc-700 px-2 py-1 text-xs text-zinc-200 hover:text-white"
-                                    onClick={() => removeLatestHabitSessionForToday(habit.id)}
+                                    className="rounded-full border border-zinc-700 px-2 py-1 text-xs text-zinc-200 hover:text-white disabled:opacity-50"
+                                    onClick={() => removeLatestHabitSessionForDate(habit.id, habitViewDateKey)}
+                                    disabled={habitSaving}
                                   >
                                     −
                                   </button>
@@ -2499,8 +2735,9 @@ export default function Home() {
                                   />
                                   <button
                                     type="button"
-                                    className="rounded-full border border-zinc-700 px-2 py-1 text-xs text-zinc-200 hover:text-white"
-                                    onClick={() => logHabitForToday(habit.id, 1)}
+                                    className="rounded-full border border-zinc-700 px-2 py-1 text-xs text-zinc-200 hover:text-white disabled:opacity-50"
+                                    onClick={() => logHabitForDate(habit.id, habitViewDateKey, 1)}
+                                    disabled={habitSaving || habitViewDateKey > todayKey}
                                   >
                                     +
                                   </button>
@@ -2512,29 +2749,158 @@ export default function Home() {
                             ) : (
                               <button
                                 type="button"
-                                className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-200 hover:text-white"
+                                className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-200 hover:text-white disabled:opacity-50"
+                                disabled={habitSaving || habitViewDateKey > todayKey}
                                 onClick={() =>
                                   habitSessions.some((session) => {
                                     if (session.habitId !== habit.id) return false;
                                     const parsed = new Date(session.createdAt);
                                     if (Number.isNaN(parsed.getTime())) return false;
-                                    return toDateKey(parsed) === toDateKey(new Date());
+                                    return toDateKey(parsed) === habitViewDateKey;
                                   })
-                                    ? removeLatestHabitSessionForToday(habit.id)
-                                    : logHabitForToday(habit.id)
+                                    ? removeLatestHabitSessionForDate(habit.id, habitViewDateKey)
+                                    : logHabitForDate(habit.id, habitViewDateKey)
                                 }
                               >
                                 {habitSessions.some((session) => {
                                   if (session.habitId !== habit.id) return false;
                                   const parsed = new Date(session.createdAt);
                                   if (Number.isNaN(parsed.getTime())) return false;
-                                  return toDateKey(parsed) === toDateKey(new Date());
+                                  return toDateKey(parsed) === habitViewDateKey;
                                 })
-                                  ? "Undo check"
-                                  : "Check habit (one tap)"}
+                                  ? habitViewDateKey === todayKey
+                                    ? "Undo check"
+                                    : "Undo for this day"
+                                  : habitViewDateKey === todayKey
+                                    ? "Check habit (one tap)"
+                                    : "Log for this day"}
                               </button>
                             )}
                           </div>
+                          {(() => {
+                            const sessionsOnViewDate = habitSessions
+                              .filter(
+                                (s) =>
+                                  s.habitId === habit.id &&
+                                  toDateKey(new Date(s.createdAt)) === habitViewDateKey
+                              )
+                              .sort(
+                                (a, b) =>
+                                  new Date(b.createdAt).getTime() -
+                                  new Date(a.createdAt).getTime()
+                              );
+                            if (sessionsOnViewDate.length === 0) return null;
+                            return (
+                              <div className="mt-3 border-t border-zinc-800 pt-3">
+                                <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                                  On this day
+                                </p>
+                                <ul className="mt-2 space-y-1.5">
+                                  {sessionsOnViewDate.map((session) => {
+                                    const isEditing = editingSessionId === session.id;
+                                    const inputs = sessionEditInputs[session.id] ?? {
+                                      amount: String(session.amount ?? ""),
+                                      note: session.data ?? "",
+                                    };
+                                    return (
+                                      <li
+                                        key={session.id}
+                                        className="flex flex-wrap items-center gap-2 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1.5 text-xs"
+                                      >
+                                        {isEditing ? (
+                                          <>
+                                            {habit.kind === "amount" && (
+                                              <input
+                                                type="number"
+                                                min={0}
+                                                step={0.1}
+                                                className="w-16 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-zinc-100"
+                                                value={inputs.amount}
+                                                onChange={(e) =>
+                                                  setSessionEditInputs((prev) => ({
+                                                    ...prev,
+                                                    [session.id]: {
+                                                      ...prev[session.id],
+                                                      amount: e.target.value,
+                                                      note: prev[session.id]?.note ?? "",
+                                                    },
+                                                  }))
+                                                }
+                                              />
+                                            )}
+                                            <input
+                                              className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-zinc-100"
+                                              placeholder="Note"
+                                              value={inputs.note}
+                                              onChange={(e) =>
+                                                setSessionEditInputs((prev) => ({
+                                                  ...prev,
+                                                  [session.id]: {
+                                                    ...prev[session.id],
+                                                    amount: prev[session.id]?.amount ?? "",
+                                                    note: e.target.value,
+                                                  },
+                                                }))
+                                              }
+                                            />
+                                            <button
+                                              type="button"
+                                              className="rounded bg-amber-500/80 px-2 py-1 text-[11px] font-medium text-white hover:bg-amber-500 disabled:opacity-50"
+                                              onClick={() => saveSessionEdit(session.id)}
+                                              disabled={habitSaving}
+                                            >
+                                              Save
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="rounded border border-zinc-600 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800"
+                                              onClick={() => {
+                                                setEditingSessionId(null);
+                                              }}
+                                            >
+                                              Cancel
+                                            </button>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <span className="text-zinc-200">
+                                              {habit.kind === "amount"
+                                                ? `${session.amount ?? 0}${session.data ? ` · ${session.data}` : ""}`
+                                                : session.data || "Check"}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              className="text-[11px] text-amber-200 hover:text-amber-100"
+                                              onClick={() => {
+                                                setEditingSessionId(session.id);
+                                                setSessionEditInputs((prev) => ({
+                                                  ...prev,
+                                                  [session.id]: {
+                                                    amount: String(session.amount ?? ""),
+                                                    note: session.data ?? "",
+                                                  },
+                                                }));
+                                              }}
+                                            >
+                                              Edit
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="text-[11px] text-rose-300 hover:text-rose-200"
+                                              onClick={() => removeHabitSessionById(session.id)}
+                                              disabled={habitSaving}
+                                            >
+                                              Remove
+                                            </button>
+                                          </>
+                                        )}
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              </div>
+                            );
+                          })()}
                         </div>
                         {(isExpanded || expandedHabitId !== null) && (
                           <div className="mt-4 space-y-3 text-xs text-zinc-200">
