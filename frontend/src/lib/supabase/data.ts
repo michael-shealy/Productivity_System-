@@ -225,14 +225,28 @@ export async function loadHabitSessions(
   supabase: SupabaseClient,
   userId: string
 ): Promise<HabitSession[]> {
-  const { data } = await supabase
-    .from("habit_sessions")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at");
+  const PAGE_SIZE = 1000;
+  const allRows: { id: string; habit_id: string; duration: number | null; amount: number | null; data: string | null; created_at: string; finished_at: string | null }[] = [];
+  let from = 0;
+  let hasMore = true;
 
-  if (!data) return [];
-  return data.map((row) => ({
+  while (hasMore) {
+    const to = from + PAGE_SIZE - 1;
+    const { data: page, error } = await supabase
+      .from("habit_sessions")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .range(from, to);
+
+    if (error) break;
+    if (!page?.length) break;
+    allRows.push(...(page as typeof allRows));
+    hasMore = page.length === PAGE_SIZE;
+    from += PAGE_SIZE;
+  }
+
+  return allRows.map((row) => ({
     id: row.id,
     habitId: row.habit_id,
     duration: row.duration,
