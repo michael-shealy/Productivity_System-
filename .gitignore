@@ -2,3 +2,10 @@
 __pycache__/
 *.pyc
 nul
+
+# IDE / tooling (can contain local paths or debug output)
+.cursor/
+.claude/
+
+export_*/
+wellhub_memberships.csv
