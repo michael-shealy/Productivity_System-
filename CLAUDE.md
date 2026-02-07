@@ -26,15 +26,18 @@ Copy `frontend/.env.example` to `frontend/.env.local` and fill in:
 - `TODOIST_CLIENT_ID` / `TODOIST_CLIENT_SECRET` — Todoist OAuth app credentials
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — Google OAuth app credentials
 - `ANTHROPIC_API_KEY` — for AI briefing generation (uses Claude Sonnet 4.5)
+- `NEXT_PUBLIC_SUPABASE_URL` — Supabase project URL
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Supabase anonymous/public API key
 
 ## Architecture
 
 ### Stack
 - **Frontend**: Next.js 16 (App Router) + React 19 + Tailwind CSS 4 + TypeScript
 - **AI**: Anthropic SDK (`@anthropic-ai/sdk`) — server-side only via API route
-- **Auth**: OAuth tokens stored in cookies (Todoist, Google) — no Supabase yet
-- **State**: All client state lives in `page.tsx` via `useState` — no state management library
-- **Data persistence**: localStorage for habits cache and AI briefing cache; no database yet
+- **Auth**: Supabase Auth (email/password) — session managed via `@supabase/ssr` middleware
+- **Database**: Supabase (PostgreSQL) with Row Level Security — all user data persisted per-user
+- **OAuth**: Todoist + Google tokens stored in `user_oauth_tokens` table (per-user, auto-refreshed for Google)
+- **State**: Client state lives in `page.tsx` via `useState`, loaded from Supabase on mount, saved via debounced writes
 
 ### Key Architectural Decisions
 
@@ -44,14 +47,40 @@ Copy `frontend/.env.example` to `frontend/.env.local` and fill in:
 
 **Dual-view architecture**: The UI has two tabs — "Practice" (identity/habits) and "Tasks" (operational). This separation is fundamental to the system's philosophy and must be preserved.
 
+**Supabase data layer** (`frontend/src/lib/supabase/`):
+- `client.ts` — browser-side Supabase client (`createBrowserClient`)
+- `server.ts` — server-side client for Server Components (`cookies()`)
+- `route.ts` — server-side client for API route handlers
+- `middleware.ts` — session validation + redirect logic
+- `tokens.ts` — OAuth token fetch/upsert with auto-refresh for Google
+- `data.ts` — all CRUD operations for daily data (identity metrics, morning flow, focus3, goals, habits, AI briefings)
+- `types.ts` — TypeScript types for all database rows
+
+**Auth flow**: Next.js middleware validates the Supabase session on every request. Unauthenticated users are redirected to `/login`. API routes check auth via `getRouteUser()`. Login is email/password only — accounts are created in the Supabase dashboard.
+
 **AI briefing pipeline**:
-1. `frontend/src/lib/ai.ts` — types, context builder (`buildBriefingContext`), and localStorage cache (4-hour TTL)
-2. `frontend/src/lib/useAIBriefing.ts` — React hook that manages fetch lifecycle, caching, and abort control
+1. `frontend/src/lib/ai.ts` — types and context builder (`buildBriefingContext`)
+2. `frontend/src/lib/useAIBriefing.ts` — React hook that manages fetch lifecycle, Supabase-backed caching, and abort control
 3. `frontend/src/app/api/ai/briefing/route.ts` — server route that calls Anthropic API with an identity-focused system prompt and returns structured JSON
 
-**Goals are hardcoded** in `frontend/src/lib/goals.ts` as a static array (7 goals across domains: Health, Emotional Growth, Marriage, graduate program, Career, Relationships, Daily Identity).
+**Goals** stored in `goals` table in Supabase. The `Goal` type is defined in `frontend/src/lib/goals.ts`. Seeded via `supabase/seed.sql`.
 
-**Habit data import**: CSV files from a habit tracking app export live at the repo root (`export_1770248675244/`). The API route at `/api/habits/import` reads these CSVs server-side, parses them with `frontend/src/lib/habits.ts`, and the client caches the result in localStorage via `frontend/src/lib/habitStore.ts`.
+**Habits + sessions** stored in `habits` and `habit_sessions` tables. Originally imported from CSV exports (`export_1770248675244/`), now seeded into the database.
+
+### Database Schema
+
+Defined in `supabase/migrations/001_initial_schema.sql`. All tables have RLS policies restricting access to the owning user.
+
+| Table | Purpose |
+|---|---|
+| `user_oauth_tokens` | Todoist + Google OAuth tokens per user |
+| `goals` | User goals (seeded from original hardcoded list) |
+| `habits` | Habit definitions |
+| `habit_sessions` | Individual habit log entries |
+| `daily_identity_metrics` | 5 daily identity checks per date |
+| `daily_morning_flow` | Morning flow status + step completion per date |
+| `daily_focus3` | Focus 3 items (jsonb) per date |
+| `daily_ai_briefings` | Cached AI briefing responses per date |
 
 ### API Routes
 
@@ -59,18 +88,17 @@ All under `frontend/src/app/api/`:
 
 | Route | Methods | Purpose |
 |---|---|---|
-| `todoist/auth/start` | GET | Initiates Todoist OAuth |
-| `todoist/auth/callback` | GET | Handles OAuth callback, sets cookie |
+| `todoist/auth/start` | GET | Initiates Todoist OAuth (requires auth) |
+| `todoist/auth/callback` | GET | Handles OAuth callback, stores token in DB |
 | `todoist/tasks` | GET, POST, PATCH, DELETE | Full CRUD for Todoist tasks |
 | `todoist/projects` | GET | List Todoist projects |
-| `google/auth/start` | GET | Initiates Google OAuth |
-| `google/auth/callback` | GET | Handles OAuth callback, sets cookie |
-| `google/events` | GET, POST | Read/create Google Calendar events |
+| `google/auth/start` | GET | Initiates Google OAuth (requires auth) |
+| `google/auth/callback` | GET | Handles OAuth callback, stores token in DB |
+| `google/events` | GET, POST, PATCH, DELETE | Full CRUD for Google Calendar events |
 | `google/calendars` | GET | List Google calendars |
-| `habits/import` | GET | Parse CSV exports into habit data |
 | `ai/briefing` | POST | Generate AI morning briefing via Anthropic |
 
-OAuth callbacks redirect back to `/` after storing tokens in cookies.
+All API routes verify Supabase auth and read OAuth tokens from the database.
 
 ## Critical Design Principles
 
@@ -79,8 +107,8 @@ These are derived from `CURRENT_STATE_AND_REQUIREMENTS.md` (the source of truth)
 1. **Identity vs productivity separation**: Identity practices (morning ritual, exercise, learning blocks) must NEVER be in the same task list as operational tasks. They use different visualizations, interactions, and success metrics.
 2. **Non-punitive tone**: No streak pressure, no guilt messaging, no "behind" language. 70-80% adherence is the target, not "not quite 100%".
 3. **Minimum/normal/stretch tiers**: Every practice has three tiers. Minimums are legitimate, not failure states. The UI must make it easy to select minimum with no guilt.
-4. **5 daily identity metrics**: Morning grounding, embodied movement, nutritional awareness, present connection, curiosity spark. These are the primary success dashboard (stored in client state as `identityMetrics`).
-5. **Morning flow**: A guided sequence (briefing -> focus3 -> identity check -> habits) tracked in `morningFlowSteps` state.
+4. **5 daily identity metrics**: Morning grounding, embodied movement, nutritional awareness, present connection, curiosity spark. These are the primary success dashboard (stored in client state as `identityMetrics`, persisted to `daily_identity_metrics`).
+5. **Morning flow**: A guided sequence (briefing -> focus3 -> identity check -> habits) tracked in `morningFlowSteps` state, persisted to `daily_morning_flow`.
 6. **AI framing**: All AI suggestions must be identity-framed ("the person you are becoming"), cite specific data, and never use deficit language.
 
 ## Key Reference Documents
@@ -97,9 +125,7 @@ After completing a feature or meaningful change, always add a numbered `.md` fil
 
 ## Known Issues / Tech Debt
 
-- `useAIBriefing.ts` contains extensive debug logging (`#region agent log` blocks posting to `127.0.0.1:7242`) that should be removed for production
-- The same debug logging exists in `api/ai/briefing/route.ts`
 - `page.tsx` is a single very large component — state and UI should eventually be decomposed
-- No database — all persistence is cookies (OAuth tokens) and localStorage (habits, briefing cache)
 - No test suite
-- Goals are hardcoded rather than user-configurable
+- Pre-existing lint errors: `@typescript-eslint/no-explicit-any` in API route normalizer calls
+- Habits import from CSV is now a one-time seed — consider a UI for creating/editing habits directly

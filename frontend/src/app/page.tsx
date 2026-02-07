@@ -19,18 +19,21 @@ import {
   loadGoals,
   loadHabits,
   loadHabitSessions,
-  loadAIBriefing as _loadAIBriefing,
 } from "@/lib/supabase/data";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 
 export default function Home() {
+  const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [userGoals, setUserGoals] = useState<Goal[]>([]);
   const [todoistTasks, setTodoistTasks] = useState<TaskContract[]>([]);
   const [completedTodayTasks, setCompletedTodayTasks] = useState<TaskContract[]>([]);
   const [habits, setHabits] = useState<Habit[]>([]);
   const [habitSessions, setHabitSessions] = useState<HabitSession[]>([]);
   const [habitLoading, setHabitLoading] = useState(false);
   const [habitError, setHabitError] = useState<string | null>(null);
-  const [habitSource, setHabitSource] = useState("export_1770248675244");
+  const [, setHabitSource] = useState("export_1770248675244");
   const [expandedHabitId, setExpandedHabitId] = useState<string | null>(null);
   const [habitLogInputs, setHabitLogInputs] = useState<
     Record<string, { amount: string; note: string }>
@@ -127,6 +130,66 @@ export default function Home() {
   const [newEventEnd, setNewEventEnd] = useState("");
   const [newEventLocation, setNewEventLocation] = useState("");
   const [newEventColor, setNewEventColor] = useState("");
+
+  // Debounce timers for Supabase saves
+  const identitySaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const morningFlowSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auth check + initial data load from Supabase
+  useEffect(() => {
+    let cancelled = false;
+    const sb = createClient();
+    setSupabase(sb);
+
+    async function init() {
+      const { data: { user: authUser } } = await sb.auth.getUser();
+      if (cancelled) return;
+
+      if (!authUser) {
+        window.location.href = "/login";
+        return;
+      }
+      setUser(authUser);
+      setAuthLoading(false);
+
+      // Load all daily data in parallel
+      const today = new Date();
+      const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+      const [goalsData, habitsData, sessionsData, metricsData, flowData, focus3Data] = await Promise.all([
+        loadGoals(sb, authUser.id),
+        loadHabits(sb, authUser.id),
+        loadHabitSessions(sb, authUser.id),
+        loadIdentityMetrics(sb, authUser.id, dateKey),
+        loadMorningFlow(sb, authUser.id, dateKey),
+        loadFocus3(sb, authUser.id, dateKey),
+      ]);
+
+      if (cancelled) return;
+
+      setUserGoals(goalsData);
+      if (habitsData.length) setHabits(habitsData);
+      if (sessionsData.length) setHabitSessions(sessionsData);
+      if (metricsData) setIdentityMetrics(metricsData);
+      if (flowData) {
+        setMorningFlowStatus(flowData.status);
+        setMorningFlowSteps(flowData.steps);
+      }
+      if (focus3Data?.length) {
+        setFocus3Snapshot(focus3Data);
+        setFocus3OverrideDate(dateKey);
+      }
+    }
+
+    init();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  }, [supabase]);
 
   const hasTodoist = todoistTasks.length > 0;
   const hasCalendar = calendarEvents.length > 0;
@@ -634,24 +697,6 @@ export default function Home() {
   }, []);
 
   const loadGoogleCalendars = useCallback(async (silent = false) => {
-    // #region agent log
-    void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "debug-session",
-        runId: "pre-fix",
-        hypothesisId: "H1",
-        location: "page.tsx:loadGoogleCalendars:entry",
-        message: "Entering loadGoogleCalendars",
-        data: {
-          silent,
-          selectedCalendarIdsLength: selectedCalendarIds.length,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     try {
       const response = await fetch("/api/google/calendars");
       if (!response.ok) {
@@ -684,25 +729,6 @@ export default function Home() {
         nextSelectedIds = defaults.length ? defaults : calendars.map((item) => item.id);
         setSelectedCalendarIds(nextSelectedIds);
       }
-      // #region agent log
-      void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: "debug-session",
-          runId: "pre-fix",
-          hypothesisId: "H2",
-          location: "page.tsx:loadGoogleCalendars:afterFetch",
-          message: "Loaded Google calendars and computed selected ids",
-          data: {
-            calendarCount: calendars.length,
-            selectedCalendarIdsBefore: selectedCalendarIds,
-            selectedCalendarIdsAfter: nextSelectedIds,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
     } catch (error) {
       if (!silent) {
         setCalendarError(
@@ -714,24 +740,6 @@ export default function Home() {
 
   const loadCalendar = useCallback(
     async (silent = false) => {
-      // #region agent log
-      void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: "debug-session",
-          runId: "pre-fix",
-          hypothesisId: "H3",
-          location: "page.tsx:loadCalendar:entry",
-          message: "Entering loadCalendar",
-          data: {
-            silent,
-            selectedCalendarIds,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setCalendarLoading(true);
       setCalendarError(null);
       try {
@@ -754,25 +762,6 @@ export default function Home() {
           items: CalendarEventContract[];
         };
         setCalendarEvents(payload.items ?? []);
-        // #region agent log
-        void fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "debug-session",
-            runId: "pre-fix",
-            hypothesisId: "H3",
-            location: "page.tsx:loadCalendar:afterFetch",
-            message: "Loaded calendar events",
-            data: {
-              responseStatus: response.status,
-              calendarParam,
-              itemsCount: payload.items?.length ?? 0,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
       } catch (error) {
         if (!silent) {
           setCalendarError(
@@ -787,20 +776,23 @@ export default function Home() {
   );
 
   const loadHabitHistory = useCallback(async () => {
+    if (!user || !supabase) return;
     setHabitLoading(true);
     setHabitError(null);
     try {
-      const payload = await fetchHabitsFromApi();
-      setHabits(payload.habits ?? []);
-      setHabitSessions(payload.habitSessions ?? []);
-      setHabitSource(payload.source ?? "export_1770248675244");
-      saveHabitsToStorage(payload);
+      const [habitsData, sessionsData] = await Promise.all([
+        loadHabits(supabase, user.id),
+        loadHabitSessions(supabase, user.id),
+      ]);
+      setHabits(habitsData);
+      setHabitSessions(sessionsData);
+      setHabitSource("supabase");
     } catch (error) {
-      setHabitError(error instanceof Error ? error.message : "Habit import failed");
+      setHabitError(error instanceof Error ? error.message : "Habit load failed");
     } finally {
       setHabitLoading(false);
     }
-  }, []);
+  }, [supabase, user]);
 
   useEffect(() => {
     loadTodoist(true);
@@ -809,106 +801,26 @@ export default function Home() {
     loadCalendar(true);
   }, [loadTodoist, loadTodoistProjects, loadGoogleCalendars, loadCalendar]);
 
+  // Debounced save: morning flow status + steps → Supabase
   useEffect(() => {
-    const cached = loadHabitsFromStorage();
-    if (cached) {
-      setHabits(cached.habits ?? []);
-      setHabitSessions(cached.habitSessions ?? []);
-      setHabitSource(cached.source ?? "export_1770248675244");
-    }
-  }, []);
+    if (!user || !supabase) return;
+    if (morningFlowSaveTimer.current) clearTimeout(morningFlowSaveTimer.current);
+    morningFlowSaveTimer.current = setTimeout(() => {
+      saveMorningFlow(supabase, user.id, todayKey, {
+        status: morningFlowStatus,
+        steps: morningFlowSteps,
+      }).catch(() => {});
+    }, 500);
+  }, [morningFlowStatus, morningFlowSteps, todayKey, supabase, user]);
 
+  // Debounced save: identity metrics → Supabase
   useEffect(() => {
-    const cached = localStorage.getItem("morningFlowStatus");
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached) as { date: string; status: string };
-        if (parsed.date === todayKey) {
-          if (
-            parsed.status === "idle" ||
-            parsed.status === "in_progress" ||
-            parsed.status === "complete"
-          ) {
-            setMorningFlowStatus(parsed.status);
-          }
-        }
-      } catch {
-        localStorage.removeItem("morningFlowStatus");
-      }
-    }
-  }, [todayKey]);
-
-  useEffect(() => {
-    const cached = localStorage.getItem("morningFlowSteps");
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached) as {
-          date: string;
-          steps: typeof morningFlowSteps;
-        };
-        if (parsed.date === todayKey && parsed.steps) {
-          setMorningFlowSteps(parsed.steps);
-        }
-      } catch {
-        localStorage.removeItem("morningFlowSteps");
-      }
-    }
-  }, [todayKey]);
-
-  useEffect(() => {
-    localStorage.setItem(
-      "morningFlowStatus",
-      JSON.stringify({ date: todayKey, status: morningFlowStatus })
-    );
-  }, [morningFlowStatus, todayKey]);
-
-  useEffect(() => {
-    localStorage.setItem(
-      "morningFlowSteps",
-      JSON.stringify({ date: todayKey, steps: morningFlowSteps })
-    );
-  }, [morningFlowSteps, todayKey]);
-
-  useEffect(() => {
-    const cached = localStorage.getItem("identityCheck");
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached) as {
-          date: string;
-          metrics: typeof identityMetrics;
-        };
-        if (parsed.date === todayKey && parsed.metrics) {
-          setIdentityMetrics(parsed.metrics);
-        }
-      } catch {
-        localStorage.removeItem("identityCheck");
-      }
-    }
-  }, [todayKey]);
-
-  useEffect(() => {
-    const cached = localStorage.getItem("focus3Override");
-    if (!cached) return;
-    try {
-      const parsed = JSON.parse(cached) as {
-        date: string;
-        items: Array<{ id: string; label: string; type: string }>;
-      };
-      if (parsed.date === todayKey && parsed.items?.length) {
-        setFocus3Snapshot(parsed.items);
-        setFocus3OverrideDate(parsed.date);
-      }
-    } catch {
-      localStorage.removeItem("focus3Override");
-    }
-  }, [todayKey]);
-
-  useEffect(() => {
-    localStorage.setItem(
-      "identityCheck",
-      JSON.stringify({ date: todayKey, metrics: identityMetrics })
-    );
-  }, [identityMetrics, todayKey]);
+    if (!user || !supabase) return;
+    if (identitySaveTimer.current) clearTimeout(identitySaveTimer.current);
+    identitySaveTimer.current = setTimeout(() => {
+      saveIdentityMetrics(supabase, user.id, todayKey, identityMetrics).catch(() => {});
+    }, 500);
+  }, [identityMetrics, todayKey, supabase, user]);
 
   useEffect(() => {
     if (selectedCalendarIds.length) {
@@ -1571,7 +1483,7 @@ export default function Home() {
       return null;
     }
     return buildBriefingContext({
-      goals: activeGoals(),
+      goals: userGoals,
       dueTodayTasks,
       completedTodayTasks,
       todayAgendaEvents,
@@ -1582,6 +1494,7 @@ export default function Home() {
       morningFlowStatus,
     });
   }, [
+    userGoals,
     habitStats,
     dueTodayTasks,
     completedTodayTasks,
@@ -1592,7 +1505,7 @@ export default function Home() {
     morningFlowStatus,
   ]);
 
-  const aiBriefing = useAIBriefing(aiBriefingContext);
+  const aiBriefing = useAIBriefing(aiBriefingContext, supabase, user?.id ?? null);
 
   const morningFlowStepCount = Object.values(morningFlowSteps).filter(Boolean).length;
   const morningFlowTotalSteps = Object.keys(morningFlowSteps).length;
@@ -1606,8 +1519,9 @@ export default function Home() {
       identity: false,
       habits: false,
     });
-    localStorage.removeItem("morningFlowStatus");
-    localStorage.removeItem("morningFlowSteps");
+    if (user && supabase) {
+      deleteMorningFlow(supabase, user.id, todayKey).catch(() => {});
+    }
   };
 
   const saveFocus3Override = () => {
@@ -1628,17 +1542,18 @@ export default function Home() {
     }));
     setFocus3Snapshot(nextItems);
     setFocus3OverrideDate(todayKey);
-    localStorage.setItem(
-      "focus3Override",
-      JSON.stringify({ date: todayKey, items: nextItems })
-    );
+    if (user && supabase) {
+      saveFocus3(supabase, user.id, todayKey, nextItems).catch(() => {});
+    }
     setFocus3Editing(false);
   };
 
   const resetFocus3Override = () => {
-    localStorage.removeItem("focus3Override");
     setFocus3OverrideDate(null);
     setFocus3SnapshotDate("");
+    if (user && supabase) {
+      deleteFocus3(supabase, user.id, todayKey).catch(() => {});
+    }
   };
 
   const scrollToSection = (id: string) => {
@@ -1748,11 +1663,6 @@ export default function Home() {
     };
     const nextSessions = [newSession, ...habitSessions];
     setHabitSessions(nextSessions);
-    saveHabitsToStorage({
-      habits,
-      habitSessions: nextSessions,
-      source: habitSource,
-    });
     setHabitLogInputs((prev) => ({
       ...prev,
       [habit.id]: { amount: "", note: "" },
@@ -1780,11 +1690,6 @@ export default function Home() {
     }
     const nextSessions = habitSessions.filter((_, index) => index !== latestIndex);
     setHabitSessions(nextSessions);
-    saveHabitsToStorage({
-      habits,
-      habitSessions: nextSessions,
-      source: habitSource,
-    });
     setHabitError(null);
   };
 
@@ -1809,11 +1714,6 @@ export default function Home() {
         : habit
     );
     setHabits(nextHabits);
-    saveHabitsToStorage({
-      habits: nextHabits,
-      habitSessions,
-      source: habitSource,
-    });
     setHabitEditId(null);
     setHabitError(null);
   };
@@ -1892,6 +1792,14 @@ export default function Home() {
     }
     return series;
   };
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-zinc-950 via-slate-950 to-indigo-950">
+        <p className="text-sm text-zinc-500">Loading...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-zinc-950 via-slate-950 to-indigo-950 font-sans text-zinc-100">
@@ -2023,9 +1931,18 @@ export default function Home() {
         )}
 
         <header className="flex flex-col gap-2">
-          <p className="text-sm uppercase tracking-[0.2em] text-zinc-400">
-            Daily System
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-sm uppercase tracking-[0.2em] text-zinc-400">
+              Daily System
+            </p>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="rounded-full border border-zinc-800 px-3 py-1 text-xs text-zinc-500 hover:text-zinc-300"
+            >
+              Sign out
+            </button>
+          </div>
           <h1 className="text-3xl font-semibold tracking-tight">
             Morning Briefing + Plan
           </h1>
@@ -3669,7 +3586,7 @@ export default function Home() {
                     <span className="font-semibold">Todoist</span>
                     <button
                       className="text-xs font-medium text-indigo-300 hover:text-indigo-200"
-                      onClick={loadTodoist}
+                      onClick={() => loadTodoist()}
                       type="button"
                     >
                       {todoistLoading ? "Loading..." : "Load tasks"}
@@ -3916,7 +3833,7 @@ export default function Home() {
                     <span className="font-semibold">Google Calendar</span>
                     <button
                       className="text-xs font-medium text-emerald-300 hover:text-emerald-200"
-                      onClick={loadCalendar}
+                      onClick={() => loadCalendar()}
                       type="button"
                     >
                       {calendarLoading ? "Loading..." : "Load events"}

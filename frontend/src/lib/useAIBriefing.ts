@@ -177,7 +177,6 @@ export function useAIBriefing(
       fetchedDateRef.current = null;
       fetchBriefing(context, true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [context, fetchBriefing, refreshCounter]);
 
   const refresh = useCallback(() => {
