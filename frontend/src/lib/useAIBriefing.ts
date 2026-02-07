@@ -26,6 +26,7 @@ export function useAIBriefing(
   const requestIdRef = useRef(0);
   const mountedRef = useRef(true);
   const autoRequestedDateRef = useRef<string | null>(null);
+  const refreshFetchStartedRef = useRef(0);
 
   const todayKey = context?.today ?? null;
 
@@ -174,6 +175,10 @@ export function useAIBriefing(
       autoRequestedDateRef.current = currentDate;
       fetchBriefing(context, false);
     } else {
+      if (refreshFetchStartedRef.current === refreshCounter) {
+        return;
+      }
+      refreshFetchStartedRef.current = refreshCounter;
       fetchedDateRef.current = null;
       fetchBriefing(context, true);
     }

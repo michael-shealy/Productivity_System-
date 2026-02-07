@@ -257,6 +257,100 @@ export async function loadHabitSessions(
   }));
 }
 
+export type InsertHabitSessionPayload = {
+  habitId: string;
+  amount?: number | null;
+  duration?: number | null;
+  data?: string | null;
+  createdAt?: string;
+  finishedAt?: string | null;
+};
+
+export async function insertHabitSession(
+  supabase: SupabaseClient,
+  userId: string,
+  payload: InsertHabitSessionPayload
+): Promise<HabitSession | null> {
+  const now = new Date().toISOString();
+  const createdAt = payload.createdAt ?? now;
+  const finishedAt = payload.finishedAt ?? now;
+  const { data, error } = await supabase
+    .from("habit_sessions")
+    .insert({
+      user_id: userId,
+      habit_id: payload.habitId,
+      amount: payload.amount ?? null,
+      duration: payload.duration ?? null,
+      data: payload.data ?? null,
+      created_at: createdAt,
+      finished_at: finishedAt,
+    })
+    .select("id, habit_id, duration, amount, data, created_at, finished_at")
+    .single();
+
+  if (error || !data) return null;
+  return {
+    id: data.id,
+    habitId: data.habit_id,
+    duration: data.duration,
+    amount: data.amount,
+    data: data.data,
+    createdAt: data.created_at,
+    finishedAt: data.finished_at,
+  };
+}
+
+export type UpdateHabitSessionPayload = {
+  amount?: number | null;
+  duration?: number | null;
+  data?: string | null;
+};
+
+export async function updateHabitSession(
+  supabase: SupabaseClient,
+  userId: string,
+  sessionId: string,
+  updates: UpdateHabitSessionPayload
+): Promise<HabitSession | null> {
+  const body: Record<string, unknown> = {};
+  if (updates.amount !== undefined) body.amount = updates.amount;
+  if (updates.duration !== undefined) body.duration = updates.duration;
+  if (updates.data !== undefined) body.data = updates.data;
+  if (Object.keys(body).length === 0) return null;
+
+  const { data, error } = await supabase
+    .from("habit_sessions")
+    .update(body)
+    .eq("id", sessionId)
+    .eq("user_id", userId)
+    .select("id, habit_id, duration, amount, data, created_at, finished_at")
+    .single();
+
+  if (error || !data) return null;
+  return {
+    id: data.id,
+    habitId: data.habit_id,
+    duration: data.duration,
+    amount: data.amount,
+    data: data.data,
+    createdAt: data.created_at,
+    finishedAt: data.finished_at,
+  };
+}
+
+export async function deleteHabitSession(
+  supabase: SupabaseClient,
+  userId: string,
+  sessionId: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from("habit_sessions")
+    .delete()
+    .eq("id", sessionId)
+    .eq("user_id", userId);
+  return !error;
+}
+
 // ── AI Briefing Cache ─────────────────────────────────────────────────
 
 export async function loadAIBriefing(
