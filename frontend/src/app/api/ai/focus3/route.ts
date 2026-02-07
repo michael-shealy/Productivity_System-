@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Focus3AIRequest, Focus3AIResponse } from "@/lib/ai";
 import { getRouteUser } from "@/lib/supabase/route";
 
-const SYSTEM_PROMPT = `You are a calm, identity-focused daily coach embedded in a personal productivity system.
+const SYSTEM_PROMPT_BASE = `You are a calm, identity-focused daily coach embedded in a personal productivity system.
 
 Your job: select exactly 3 focus items for today from the provided options (tasks, events, habits, identity metrics).
 
@@ -17,6 +17,7 @@ Process:
    - Identity score gaps (unfilled identity metrics are opportunities)
    - Schedule constraints (events that are immovable anchors)
    - Interconnections between items (e.g., gym + nutritional awareness reinforce the same health goal)
+   - If "Latest weekly reflection" is provided: weight "what mattered" and "learnings" so today's focus can connect to recent reflection.
 4. Each selected item must use an "id" that exactly matches one of the provided option IDs.
 5. Return a 1-2 sentence "reasoning" explaining why these 3 were chosen, referencing the user's current phase/priorities and interconnections.
 
@@ -34,6 +35,15 @@ Output ONLY valid JSON matching this exact structure (no markdown fences, no ext
   ],
   "reasoning": "1-2 sentence explanation citing specific data and interconnections."
 }`;
+
+const SYSTEM_PROMPT_GENTLE = `
+
+Additional (user chose "Gentle" mode): Prefer recovery-friendly framing. When recent reflection mentions difficulty or low energy, favor minimums and identity anchors. Weight "what mattered" and "learnings" from their reflection when selecting focus items.`;
+
+function getSystemPrompt(aiTone?: "standard" | "gentle"): string {
+  const gentle = aiTone === "gentle" ? SYSTEM_PROMPT_GENTLE : "";
+  return SYSTEM_PROMPT_BASE + gentle;
+}
 
 function buildUserPrompt(ctx: Focus3AIRequest): string {
   const sections: string[] = [];
@@ -77,6 +87,14 @@ function buildUserPrompt(ctx: Focus3AIRequest): string {
   sections.push(
     `Identity metrics:\n${identityOptions.map((q) => `- id="identity-${q.key}" | ${q.label} | ${q.done ? "already checked" : "not yet checked"}`).join("\n")}`
   );
+
+  if (ctx.latestReflection) {
+    const r = ctx.latestReflection;
+    const cap = r.capabilityGrowth === true ? "yes" : r.capabilityGrowth === false ? "no" : "not answered";
+    sections.push(
+      `Latest weekly reflection (week of ${r.weekStartDate}):\nWhat mattered: ${r.whatMattered || "(empty)"}\nLearnings: ${r.learnings || "(empty)"}\nMore capable than 7 days ago: ${cap}`
+    );
+  }
 
   return sections.join("\n\n");
 }
@@ -167,7 +185,7 @@ export async function POST(request: Request) {
     const message = await client.messages.create({
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 512,
-      system: SYSTEM_PROMPT,
+      system: getSystemPrompt(ctx.aiTone),
       messages: [
         {
           role: "user",

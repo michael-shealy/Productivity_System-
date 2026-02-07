@@ -94,3 +94,52 @@ export type DbDailyAIBriefing = {
     why: string[];
   }>;
 };
+
+export type DbWeeklyReflection = {
+  id: string;
+  user_id: string;
+  week_start_date: string;
+  what_went_well: string;
+  what_mattered: string;
+  learnings: string;
+  capability_growth: boolean | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WeeklyReflection = {
+  weekStartDate: string;
+  whatWentWell: string;
+  whatMattered: string;
+  learnings: string;
+  capabilityGrowth: boolean | null;
+};
+
+export type UserPreferences = {
+  aiTone?: "standard" | "gentle";
+};
+
+export type DbUserPreferences = {
+  id: string;
+  user_id: string;
+  preferences: Record<string, unknown>;
+  updated_at: string;
+};
+
+export type FourWeekReview = {
+  periodEndDate: string;
+  goalId: string | null;
+  systemAdjustmentNotes: string | null;
+  reflectionSummary: string | null;
+};
+
+export type DbFourWeekReview = {
+  id: string;
+  user_id: string;
+  period_end_date: string;
+  reflection_summary: string | null;
+  goal_id: string | null;
+  system_adjustment_notes: string | null;
+  created_at: string;
+  updated_at: string;
+};

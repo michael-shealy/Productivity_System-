@@ -3,15 +3,19 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { AIBriefingRequest, AIBriefingResponse, AIInsightCard } from "@/lib/ai";
 import { getRouteUser } from "@/lib/supabase/route";
 
-const SYSTEM_PROMPT = `You are a calm, identity-focused daily coach embedded in a personal productivity system.
+const SYSTEM_PROMPT_BASE = `You are a calm, identity-focused daily coach embedded in a personal productivity system.
 
 Your tone rules:
 - Never shame, guilt, or use deficit language ("you failed", "you didn't", "you're behind").
 - Use language of invitation, observation, and gentle encouragement.
 - Frame everything through identity ("the person you are becoming") rather than output metrics.
 - Be concise — headline ≤ 2 sentences, valuesFocus ≤ 1 sentence, each whyBullet ≤ 1 sentence.
-- Every suggestion must cite at least one piece of data from the context (a streak, a task, a habit stat, an event).
+- Every suggestion must cite at least one piece of data from the context (a streak, a task, a habit stat, an event).`;
 
+const SYSTEM_PROMPT_GENTLE = `
+Additional tone (user chose "Gentle" mode): Use recovery-focused language. When habit adherence was low or the user reflected on difficulty, emphasize minimums and that no catch-up is needed. Optionally cite their reflection: "Last week you reflected that …" where relevant. Never guilt or deficit language.`;
+
+const SYSTEM_PROMPT_JSON = `
 Output ONLY valid JSON matching this exact structure (no markdown fences, no extra text):
 {
   "headline": "A 1-2 sentence personalized morning briefing based on today's context.",
@@ -35,6 +39,11 @@ Rules for insights array:
 - Each must have a "why" array with 1-2 reasons grounded in the provided data.
 - Prioritize identity practices, habit streaks worth protecting, and today's schedule constraints.
 - Never generate more than 4 insights.`;
+
+function getSystemPrompt(aiTone?: "standard" | "gentle"): string {
+  const gentle = aiTone === "gentle" ? SYSTEM_PROMPT_GENTLE : "";
+  return SYSTEM_PROMPT_BASE + gentle + SYSTEM_PROMPT_JSON;
+}
 
 function buildUserPrompt(ctx: AIBriefingRequest): string {
   const sections: string[] = [];
@@ -84,6 +93,14 @@ function buildUserPrompt(ctx: AIBriefingRequest): string {
   if (ctx.focus3.length > 0) {
     sections.push(
       `Focus 3 for today:\n${ctx.focus3.map((f) => `- ${f.label} (${f.type})`).join("\n")}`
+    );
+  }
+
+  if (ctx.latestReflection) {
+    const r = ctx.latestReflection;
+    const cap = r.capabilityGrowth === true ? "yes" : r.capabilityGrowth === false ? "no" : "not answered";
+    sections.push(
+      `Latest weekly reflection (week of ${r.weekStartDate}):\nWhat went well: ${r.whatWentWell || "(empty)"}\nWhat mattered: ${r.whatMattered || "(empty)"}\nLearnings: ${r.learnings || "(empty)"}\nMore capable than 7 days ago: ${cap}`
     );
   }
 
@@ -159,7 +176,7 @@ export async function POST(request: Request) {
     const message = await client.messages.create({
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 1024,
-      system: SYSTEM_PROMPT,
+      system: getSystemPrompt(ctx.aiTone),
       messages: [
         {
           role: "user",

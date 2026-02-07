@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Goal } from "@/lib/goals";
 import type { Habit, HabitSession } from "@/lib/habits";
 import type { AIBriefingResponse } from "@/lib/ai";
+import type { WeeklyReflection, UserPreferences } from "@/lib/supabase/types";
 
 // ── Identity Metrics ──────────────────────────────────────────────────
 
@@ -414,6 +415,187 @@ export async function deleteAIBriefing(
     .delete()
     .eq("user_id", userId)
     .eq("date", date);
+}
+
+// ── Weekly Reflection ──────────────────────────────────────────────────
+
+export async function loadWeeklyReflection(
+  supabase: SupabaseClient,
+  userId: string,
+  weekStartDate: string
+): Promise<WeeklyReflection | null> {
+  const { data } = await supabase
+    .from("weekly_reflections")
+    .select("week_start_date, what_went_well, what_mattered, learnings, capability_growth")
+    .eq("user_id", userId)
+    .eq("week_start_date", weekStartDate)
+    .single();
+
+  if (!data) return null;
+  return {
+    weekStartDate: data.week_start_date,
+    whatWentWell: data.what_went_well ?? "",
+    whatMattered: data.what_mattered ?? "",
+    learnings: data.learnings ?? "",
+    capabilityGrowth: data.capability_growth,
+  };
+}
+
+export type UpsertWeeklyReflectionPayload = {
+  whatWentWell: string;
+  whatMattered: string;
+  learnings: string;
+  capabilityGrowth: boolean | null;
+};
+
+export async function upsertWeeklyReflection(
+  supabase: SupabaseClient,
+  userId: string,
+  weekStartDate: string,
+  payload: UpsertWeeklyReflectionPayload
+): Promise<void> {
+  await supabase.from("weekly_reflections").upsert(
+    {
+      user_id: userId,
+      week_start_date: weekStartDate,
+      what_went_well: payload.whatWentWell,
+      what_mattered: payload.whatMattered,
+      learnings: payload.learnings,
+      capability_growth: payload.capabilityGrowth,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id,week_start_date" }
+  );
+}
+
+export async function loadLatestWeeklyReflection(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<WeeklyReflection | null> {
+  const { data } = await supabase
+    .from("weekly_reflections")
+    .select("week_start_date, what_went_well, what_mattered, learnings, capability_growth")
+    .eq("user_id", userId)
+    .order("week_start_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!data) return null;
+  return {
+    weekStartDate: data.week_start_date,
+    whatWentWell: data.what_went_well ?? "",
+    whatMattered: data.what_mattered ?? "",
+    learnings: data.learnings ?? "",
+    capabilityGrowth: data.capability_growth,
+  };
+}
+
+export async function loadRecentWeeklyReflections(
+  supabase: SupabaseClient,
+  userId: string,
+  limit: number
+): Promise<WeeklyReflection[]> {
+  const { data } = await supabase
+    .from("weekly_reflections")
+    .select("week_start_date, what_went_well, what_mattered, learnings, capability_growth")
+    .eq("user_id", userId)
+    .order("week_start_date", { ascending: false })
+    .limit(limit);
+
+  if (!data || !data.length) return [];
+  return data.map((row) => ({
+    weekStartDate: row.week_start_date,
+    whatWentWell: row.what_went_well ?? "",
+    whatMattered: row.what_mattered ?? "",
+    learnings: row.learnings ?? "",
+    capabilityGrowth: row.capability_growth,
+  }));
+}
+
+// ── User Preferences ───────────────────────────────────────────────────
+
+export async function loadUserPreferences(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<UserPreferences | null> {
+  const { data } = await supabase
+    .from("user_preferences")
+    .select("preferences")
+    .eq("user_id", userId)
+    .single();
+
+  if (!data?.preferences || typeof data.preferences !== "object") return null;
+  const prefs = data.preferences as Record<string, unknown>;
+  const result: UserPreferences = {};
+  if (prefs.ai_tone === "standard" || prefs.ai_tone === "gentle") {
+    result.aiTone = prefs.ai_tone;
+  }
+  return result;
+}
+
+export async function saveUserPreferences(
+  supabase: SupabaseClient,
+  userId: string,
+  preferences: UserPreferences
+): Promise<void> {
+  await supabase.from("user_preferences").upsert(
+    {
+      user_id: userId,
+      preferences: {
+        ai_tone: preferences.aiTone ?? "standard",
+      },
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id" }
+  );
+}
+
+// ── Four-Week Reviews ──────────────────────────────────────────────────
+
+export async function loadFourWeekReview(
+  supabase: SupabaseClient,
+  userId: string,
+  periodEndDate: string
+): Promise<{ periodEndDate: string; goalId: string | null; systemAdjustmentNotes: string | null; reflectionSummary: string | null } | null> {
+  const { data } = await supabase
+    .from("four_week_reviews")
+    .select("period_end_date, goal_id, system_adjustment_notes, reflection_summary")
+    .eq("user_id", userId)
+    .eq("period_end_date", periodEndDate)
+    .single();
+
+  if (!data) return null;
+  return {
+    periodEndDate: data.period_end_date,
+    goalId: data.goal_id,
+    systemAdjustmentNotes: data.system_adjustment_notes,
+    reflectionSummary: data.reflection_summary,
+  };
+}
+
+export type UpsertFourWeekReviewPayload = {
+  goalId?: string | null;
+  systemAdjustmentNotes?: string | null;
+  reflectionSummary?: string | null;
+};
+
+export async function upsertFourWeekReview(
+  supabase: SupabaseClient,
+  userId: string,
+  periodEndDate: string,
+  payload: UpsertFourWeekReviewPayload
+): Promise<void> {
+  await supabase.from("four_week_reviews").upsert(
+    {
+      user_id: userId,
+      period_end_date: periodEndDate,
+      goal_id: payload.goalId ?? null,
+      system_adjustment_notes: payload.systemAdjustmentNotes ?? null,
+      reflection_summary: payload.reflectionSummary ?? null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id,period_end_date" }
+  );
 }
 
 // ── OAuth Status ──────────────────────────────────────────────────────
