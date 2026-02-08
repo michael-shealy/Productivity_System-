@@ -28,6 +28,7 @@ import {
   saveUserPreferences,
   loadRecentWeeklyReflections,
   loadFourWeekReview,
+  loadPreviousFourWeekReview,
   upsertFourWeekReview,
 } from "@/lib/supabase/data";
 import type { WeeklyReflection, UserPreferences } from "@/lib/supabase/types";
@@ -107,14 +108,29 @@ export default function Home() {
     presentConnection: false,
     curiositySpark: false,
   });
+  /** Yesterday's identity metrics — used for AI briefing/insights so the day's checks aren't used before the user has had time to complete them. */
+  const [yesterdayIdentityMetrics, setYesterdayIdentityMetrics] = useState<{
+    morningGrounding: boolean;
+    embodiedMovement: boolean;
+    nutritionalAwareness: boolean;
+    presentConnection: boolean;
+    curiositySpark: boolean;
+  } | null>(null);
   const [weeklyReflection, setWeeklyReflection] = useState<WeeklyReflection | null>(null);
   const [weeklyReflectionSaving, setWeeklyReflectionSaving] = useState(false);
   const [latestWeeklyReflection, setLatestWeeklyReflection] = useState<WeeklyReflection | null>(null);
   const [userPreferences, setUserPreferences] = useState<UserPreferences | null>(null);
   const [fourWeekReflections, setFourWeekReflections] = useState<WeeklyReflection[]>([]);
-  const [fourWeekReviewGoalId, setFourWeekReviewGoalId] = useState<string | null>(null);
+  const [fourWeekReviewGoalIds, setFourWeekReviewGoalIds] = useState<string[]>([]);
   const [fourWeekReviewNotes, setFourWeekReviewNotes] = useState<string>("");
   const [fourWeekReviewSaving, setFourWeekReviewSaving] = useState(false);
+  const [fourWeekReviewExists, setFourWeekReviewExists] = useState(false);
+  const [fourWeekReviewEditMode, setFourWeekReviewEditMode] = useState(false);
+  const [fourWeekReviewSavedAt, setFourWeekReviewSavedAt] = useState<string | null>(null);
+  const [previousFourWeekNotes, setPreviousFourWeekNotes] = useState<string | null>(null);
+  const [weeklyReflectionFromDb, setWeeklyReflectionFromDb] = useState(false);
+  const [weeklyReflectionEditMode, setWeeklyReflectionEditMode] = useState(false);
+  const [fourWeekReviewSaveError, setFourWeekReviewSaveError] = useState<string | null>(null);
   const [focus3Status, setFocus3Status] = useState<"loading" | "proposing" | "submitted" | "editing">("loading");
   const [focus3Items, setFocus3Items] = useState<Array<{ id: string; label: string; type: string }>>([]);
   const [focus3Draft, setFocus3Draft] = useState<Array<{ id: string; label: string; type: string }>>([]);
@@ -163,8 +179,6 @@ export default function Home() {
   // Debounce timers for Supabase saves
   const identitySaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const morningFlowSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const weeklyReflectionSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const weeklyReflectionSkipSaveRef = useRef(false);
 
   // Auth check + initial data load from Supabase
   useEffect(() => {
@@ -183,15 +197,19 @@ export default function Home() {
       setUser(authUser);
       setAuthLoading(false);
 
-      // Load all daily data in parallel
+      // Load all daily data in parallel (today + yesterday for identity metrics used by AI)
       const today = new Date();
       const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayKey = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
 
-      const [goalsData, habitsData, sessionsData, metricsData, flowData, focus3Data] = await Promise.all([
+      const [goalsData, habitsData, sessionsData, metricsData, yesterdayMetricsData, flowData, focus3Data] = await Promise.all([
         loadGoals(sb, authUser.id),
         loadHabits(sb, authUser.id),
         loadHabitSessions(sb, authUser.id),
         loadIdentityMetrics(sb, authUser.id, dateKey),
+        loadIdentityMetrics(sb, authUser.id, yesterdayKey),
         loadMorningFlow(sb, authUser.id, dateKey),
         loadFocus3(sb, authUser.id, dateKey),
       ]);
@@ -202,6 +220,7 @@ export default function Home() {
       if (habitsData.length) setHabits(habitsData);
       if (sessionsData.length) setHabitSessions(sessionsData);
       if (metricsData) setIdentityMetrics(metricsData);
+      if (yesterdayMetricsData) setYesterdayIdentityMetrics(yesterdayMetricsData);
       if (flowData) {
         setMorningFlowStatus(flowData.status);
         setMorningFlowSteps(flowData.steps);
@@ -230,6 +249,19 @@ export default function Home() {
   const hasTodoist = todoistTasks.length > 0;
   const hasCalendar = calendarEvents.length > 0;
   const identityScore = Object.values(identityMetrics).filter(Boolean).length;
+  /** Yesterday's identity score (0–5) for AI briefing/insights — excludes today so morning content isn't based on incomplete checks. */
+  const identityScoreForAI =
+    yesterdayIdentityMetrics != null
+      ? Object.values(yesterdayIdentityMetrics).filter(Boolean).length
+      : 0;
+  const defaultIdentityMetricsForAI = {
+    morningGrounding: false,
+    embodiedMovement: false,
+    nutritionalAwareness: false,
+    presentConnection: false,
+    curiositySpark: false,
+  };
+  const identityMetricsForAI = yesterdayIdentityMetrics ?? defaultIdentityMetricsForAI;
 
   const formatEventTime = (event: CalendarEventContract) => {
     if (!event.start?.dateTime) return "All day";
@@ -765,12 +797,14 @@ export default function Home() {
       learnings: "",
       capabilityGrowth: null,
     };
-    weeklyReflectionSkipSaveRef.current = true;
     setWeeklyReflection(defaultReflection);
+    setWeeklyReflectionFromDb(false);
+    setWeeklyReflectionEditMode(false);
     loadWeeklyReflection(supabase, user.id, previousWeekKey).then((data) => {
       if (data) {
-        weeklyReflectionSkipSaveRef.current = true;
         setWeeklyReflection(data);
+        setWeeklyReflectionFromDb(true);
+        setWeeklyReflectionEditMode(false);
       }
     });
   }, [supabase, user, previousWeekKey]);
@@ -793,38 +827,24 @@ export default function Home() {
     loadRecentWeeklyReflections(supabase, user.id, 4).then(setFourWeekReflections);
     loadFourWeekReview(supabase, user.id, periodEndDateForFourWeek).then((review) => {
       if (review) {
-        setFourWeekReviewGoalId(review.goalId);
+        setFourWeekReviewGoalIds(review.goalIds ?? []);
         setFourWeekReviewNotes(review.systemAdjustmentNotes ?? "");
+        setFourWeekReviewExists(true);
+        setFourWeekReviewEditMode(false);
+        setFourWeekReviewSavedAt(review.updatedAt ?? null);
       } else {
-        setFourWeekReviewGoalId(null);
+        setFourWeekReviewGoalIds([]);
         setFourWeekReviewNotes("");
+        setFourWeekReviewExists(false);
+        setFourWeekReviewEditMode(false);
+        setFourWeekReviewSavedAt(null);
       }
+      setFourWeekReviewSaveError(null);
+    });
+    loadPreviousFourWeekReview(supabase, user.id, periodEndDateForFourWeek).then((prev) => {
+      setPreviousFourWeekNotes(prev?.systemAdjustmentNotes ?? null);
     });
   }, [supabase, user, periodEndDateForFourWeek]);
-
-  // Debounced save: weekly reflection → Supabase
-  useEffect(() => {
-    if (!user || !supabase || !weeklyReflection) return;
-    if (weeklyReflectionSkipSaveRef.current) {
-      weeklyReflectionSkipSaveRef.current = false;
-      return;
-    }
-    if (weeklyReflectionSaveTimer.current) clearTimeout(weeklyReflectionSaveTimer.current);
-    weeklyReflectionSaveTimer.current = setTimeout(() => {
-      setWeeklyReflectionSaving(true);
-      upsertWeeklyReflection(supabase, user.id, weeklyReflection.weekStartDate, {
-        whatWentWell: weeklyReflection.whatWentWell,
-        whatMattered: weeklyReflection.whatMattered,
-        learnings: weeklyReflection.learnings,
-        capabilityGrowth: weeklyReflection.capabilityGrowth,
-      })
-        .catch(() => {})
-        .finally(() => setWeeklyReflectionSaving(false));
-    }, 600);
-    return () => {
-      if (weeklyReflectionSaveTimer.current) clearTimeout(weeklyReflectionSaveTimer.current);
-    };
-  }, [weeklyReflection, supabase, user]);
 
   useEffect(() => {
     if (selectedCalendarIds.length) {
@@ -1588,8 +1608,8 @@ export default function Home() {
     completedTodayTasks,
     todayAgendaEvents,
     habitStats,
-    identityMetrics,
-    identityScore,
+    identityMetricsForAI: defaultIdentityMetricsForAI,
+    identityScoreForAI: 0,
     latestReflection: null as WeeklyReflection | null,
     aiTone: "standard" as "standard" | "gentle",
   });
@@ -1600,8 +1620,8 @@ export default function Home() {
     completedTodayTasks,
     todayAgendaEvents,
     habitStats,
-    identityMetrics,
-    identityScore,
+    identityMetricsForAI,
+    identityScoreForAI,
     latestReflection: latestWeeklyReflection,
     aiTone: userPreferences?.aiTone ?? "standard",
   };
@@ -1647,8 +1667,8 @@ export default function Home() {
         last7Sum: s.sumLast7,
         period: s.habit.period,
       })),
-      identityMetrics: ctx.identityMetrics,
-      identityScore: ctx.identityScore,
+      identityMetrics: ctx.identityMetricsForAI,
+      identityScore: ctx.identityScoreForAI,
       latestReflection: ctx.latestReflection ?? undefined,
       aiTone: ctx.aiTone,
     };
@@ -1714,7 +1734,7 @@ export default function Home() {
       completedTodayTasks,
       todayAgendaEvents,
       habitStats,
-      identityScore,
+      identityScore: identityScoreForAI,
       focusThemes: [],
       focus3Snapshot: focus3Status === "submitted" ? focus3Items : [],
       morningFlowStatus,
@@ -1727,7 +1747,7 @@ export default function Home() {
     dueTodayTasks,
     completedTodayTasks,
     todayAgendaEvents,
-    identityScore,
+    identityScoreForAI,
     focus3Status,
     focus3Items,
     morningFlowStatus,
@@ -1795,12 +1815,12 @@ export default function Home() {
         why: ["Morning flow is not started yet today."],
       });
     }
-    if (identityScore > 0 && identityScore < 3) {
+    if (identityScoreForAI > 0 && identityScoreForAI < 3) {
       items.push({
         id: "identity-minimum",
         title: "Aim for a 3/5 identity check",
         body: "Minimums still count, and 3‑5 is a strong day.",
-        why: [`You are at ${identityScore}/5 identity checks so far.`],
+        why: [`Yesterday you completed ${identityScoreForAI}/5 identity checks.`],
       });
     }
     if (habitSummary.total > 0) {
@@ -1826,7 +1846,7 @@ export default function Home() {
       }
     }
     return items.slice(0, 4);
-  }, [habitSummary.total, habitSummary.weekCount, identityScore, morningFlowStatus]);
+  }, [habitSummary.total, habitSummary.weekCount, identityScoreForAI, morningFlowStatus]);
 
   const logHabitForDate = useCallback(
     async (habitId: string, dateKey: string, amountOverride?: number) => {
@@ -2820,92 +2840,152 @@ export default function Home() {
                 )}
                 {weeklyReflection && weeklyReflection.weekStartDate === previousWeekKey && (
                   <div className="mt-4 space-y-4">
-                    <div>
-                      <label className="block text-[11px] font-medium text-zinc-400">
-                        What went well?
-                      </label>
-                      <textarea
-                        value={weeklyReflection.whatWentWell}
-                        onChange={(e) =>
-                          setWeeklyReflection((prev) =>
-                            prev ? { ...prev, whatWentWell: e.target.value } : null
-                          )
-                        }
-                        rows={2}
-                        className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-500 focus:border-amber-600/50 focus:outline-none focus:ring-1 focus:ring-amber-600/50"
-                        placeholder="What showed up for you?"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-medium text-zinc-400">
-                        What mattered?
-                      </label>
-                      <textarea
-                        value={weeklyReflection.whatMattered}
-                        onChange={(e) =>
-                          setWeeklyReflection((prev) =>
-                            prev ? { ...prev, whatMattered: e.target.value } : null
-                          )
-                        }
-                        rows={2}
-                        className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-500 focus:border-amber-600/50 focus:outline-none focus:ring-1 focus:ring-amber-600/50"
-                        placeholder="What felt meaningful?"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-medium text-zinc-400">
-                        Learnings?
-                      </label>
-                      <textarea
-                        value={weeklyReflection.learnings}
-                        onChange={(e) =>
-                          setWeeklyReflection((prev) =>
-                            prev ? { ...prev, learnings: e.target.value } : null
-                          )
-                        }
-                        rows={2}
-                        className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-500 focus:border-amber-600/50 focus:outline-none focus:ring-1 focus:ring-amber-600/50"
-                        placeholder="What did you learn or notice?"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-medium text-zinc-400">
-                        Am I more capable than I was 7 days ago?
-                      </label>
-                      <div className="mt-2 flex flex-wrap items-center gap-3">
-                        <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-200">
-                          <input
-                            type="radio"
-                            name="capability_growth"
-                            checked={weeklyReflection.capabilityGrowth === true}
-                            onChange={() =>
+                    {weeklyReflectionFromDb && !weeklyReflectionEditMode ? (
+                      <>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-900/50 px-2.5 py-1 text-[11px] font-medium text-emerald-200">
+                            <span aria-hidden>✓</span> Submitted
+                          </span>
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-medium text-zinc-400">What went well?</p>
+                          <p className="mt-1 text-sm text-zinc-200 whitespace-pre-wrap">{weeklyReflection.whatWentWell || "—"}</p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-medium text-zinc-400">What mattered?</p>
+                          <p className="mt-1 text-sm text-zinc-200 whitespace-pre-wrap">{weeklyReflection.whatMattered || "—"}</p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-medium text-zinc-400">Learnings?</p>
+                          <p className="mt-1 text-sm text-zinc-200 whitespace-pre-wrap">{weeklyReflection.learnings || "—"}</p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-medium text-zinc-400">Am I more capable than I was 7 days ago?</p>
+                          <p className="mt-1 text-sm text-zinc-200">
+                            {weeklyReflection.capabilityGrowth === true ? "Yes" : weeklyReflection.capabilityGrowth === false ? "No" : "—"}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setWeeklyReflectionEditMode(true)}
+                          className="rounded-full border border-zinc-600 bg-transparent px-4 py-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800/80"
+                        >
+                          Edit submission
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <label className="block text-[11px] font-medium text-zinc-400">
+                            What went well?
+                          </label>
+                          <textarea
+                            value={weeklyReflection.whatWentWell}
+                            onChange={(e) =>
                               setWeeklyReflection((prev) =>
-                                prev ? { ...prev, capabilityGrowth: true } : null
+                                prev ? { ...prev, whatWentWell: e.target.value } : null
                               )
                             }
-                            className="rounded-full border-zinc-600 bg-zinc-800 text-amber-500 focus:ring-amber-500/50"
+                            rows={2}
+                            className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-500 focus:border-amber-600/50 focus:outline-none focus:ring-1 focus:ring-amber-600/50"
+                            placeholder="What showed up for you?"
                           />
-                          Yes
-                        </label>
-                        <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-200">
-                          <input
-                            type="radio"
-                            name="capability_growth"
-                            checked={weeklyReflection.capabilityGrowth === false}
-                            onChange={() =>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-medium text-zinc-400">
+                            What mattered?
+                          </label>
+                          <textarea
+                            value={weeklyReflection.whatMattered}
+                            onChange={(e) =>
                               setWeeklyReflection((prev) =>
-                                prev ? { ...prev, capabilityGrowth: false } : null
+                                prev ? { ...prev, whatMattered: e.target.value } : null
                               )
                             }
-                            className="rounded-full border-zinc-600 bg-zinc-800 text-amber-500 focus:ring-amber-500/50"
+                            rows={2}
+                            className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-500 focus:border-amber-600/50 focus:outline-none focus:ring-1 focus:ring-amber-600/50"
+                            placeholder="What felt meaningful?"
                           />
-                          No
-                        </label>
-                        {weeklyReflectionSaving && (
-                          <span className="text-[11px] text-zinc-500">Saving…</span>
-                        )}
-                      </div>
-                    </div>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-medium text-zinc-400">
+                            Learnings?
+                          </label>
+                          <textarea
+                            value={weeklyReflection.learnings}
+                            onChange={(e) =>
+                              setWeeklyReflection((prev) =>
+                                prev ? { ...prev, learnings: e.target.value } : null
+                              )
+                            }
+                            rows={2}
+                            className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-500 focus:border-amber-600/50 focus:outline-none focus:ring-1 focus:ring-amber-600/50"
+                            placeholder="What did you learn or notice?"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-medium text-zinc-400">
+                            Am I more capable than I was 7 days ago?
+                          </label>
+                          <div className="mt-2 flex flex-wrap items-center gap-3">
+                            <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-200">
+                              <input
+                                type="radio"
+                                name="capability_growth"
+                                checked={weeklyReflection.capabilityGrowth === true}
+                                onChange={() =>
+                                  setWeeklyReflection((prev) =>
+                                    prev ? { ...prev, capabilityGrowth: true } : null
+                                  )
+                                }
+                                className="rounded-full border-zinc-600 bg-zinc-800 text-amber-500 focus:ring-amber-500/50"
+                              />
+                              Yes
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-200">
+                              <input
+                                type="radio"
+                                name="capability_growth"
+                                checked={weeklyReflection.capabilityGrowth === false}
+                                onChange={() =>
+                                  setWeeklyReflection((prev) =>
+                                    prev ? { ...prev, capabilityGrowth: false } : null
+                                  )
+                                }
+                                className="rounded-full border-zinc-600 bg-zinc-800 text-amber-500 focus:ring-amber-500/50"
+                              />
+                              No
+                            </label>
+                            {weeklyReflectionSaving && (
+                              <span className="text-[11px] text-zinc-500">Saving…</span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={weeklyReflectionSaving}
+                          onClick={async () => {
+                            if (!supabase || !user || !weeklyReflection) return;
+                            setWeeklyReflectionSaving(true);
+                            try {
+                              await upsertWeeklyReflection(supabase, user.id, weeklyReflection.weekStartDate, {
+                                whatWentWell: weeklyReflection.whatWentWell,
+                                whatMattered: weeklyReflection.whatMattered,
+                                learnings: weeklyReflection.learnings,
+                                capabilityGrowth: weeklyReflection.capabilityGrowth,
+                              });
+                              setWeeklyReflectionFromDb(true);
+                              setWeeklyReflectionEditMode(false);
+                            } finally {
+                              setWeeklyReflectionSaving(false);
+                            }
+                          }}
+                          className="rounded-full bg-amber-600 px-4 py-2 text-xs font-medium text-white hover:bg-amber-500 disabled:opacity-50"
+                        >
+                          {weeklyReflectionSaving ? "Saving…" : "Save"}
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -2916,8 +2996,16 @@ export default function Home() {
                   4-Week review
                 </p>
                 <p className="mt-1 text-xs text-zinc-500">
-                  Every 4 Sundays: reflect on the past four weeks and align with a goal.
+                  Every 4 Sundays: reflect on the past four weeks and align with goals.
                 </p>
+                {previousFourWeekNotes && (
+                  <div className="mt-3 rounded-lg border border-violet-800/40 bg-zinc-900/40 px-3 py-2">
+                    <p className="text-[11px] font-medium text-zinc-400">Last period you noted</p>
+                    <p className="mt-1 text-xs text-zinc-300">
+                      {previousFourWeekNotes.length > 200 ? previousFourWeekNotes.slice(0, 200) + "…" : previousFourWeekNotes}
+                    </p>
+                  </div>
+                )}
                 {fourWeekReflections.length > 0 && (
                   <div className="mt-4 space-y-3">
                     <p className="text-[11px] font-medium text-zinc-400">What mattered & learnings (last 4 weeks)</p>
@@ -2931,8 +3019,8 @@ export default function Home() {
                           <p className="text-[11px] font-medium text-violet-300/90">{label}</p>
                           {(r.whatMattered || r.learnings) ? (
                             <>
-                              {r.whatMattered && <p className="mt-1">What mattered: {r.whatMattered.slice(0, 120)}{r.whatMattered.length > 120 ? "…" : ""}</p>}
-                              {r.learnings && <p className="mt-1">Learnings: {r.learnings.slice(0, 120)}{r.learnings.length > 120 ? "…" : ""}</p>}
+                              {r.whatMattered && <p className="mt-1 whitespace-pre-wrap">What mattered: {r.whatMattered}</p>}
+                              {r.learnings && <p className="mt-1 whitespace-pre-wrap">Learnings: {r.learnings}</p>}
                             </>
                           ) : (
                             <p className="mt-1 text-zinc-500">No reflection for this week.</p>
@@ -2942,52 +3030,123 @@ export default function Home() {
                     })}
                   </div>
                 )}
-                <div className="mt-4 space-y-4">
-                  <div>
-                    <label className="block text-[11px] font-medium text-zinc-400">
-                      Which goal did this 4-week period best support?
-                    </label>
-                    <select
-                      value={fourWeekReviewGoalId ?? ""}
-                      onChange={(e) => setFourWeekReviewGoalId(e.target.value || null)}
-                      className="mt-1 w-full max-w-xs rounded-md border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200 focus:border-violet-600/50 focus:outline-none focus:ring-1 focus:ring-violet-600/50"
+                {fourWeekReviewExists && !fourWeekReviewEditMode ? (
+                  <div className="mt-4 space-y-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-900/50 px-2.5 py-1 text-[11px] font-medium text-emerald-200">
+                        <span aria-hidden>✓</span> Submitted
+                      </span>
+                      {fourWeekReviewSavedAt && (
+                        <span className="text-[11px] text-zinc-500">
+                          Saved {new Date(fourWeekReviewSavedAt).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-medium text-zinc-400">Goals this period supported</p>
+                      <p className="mt-1 text-sm text-zinc-200">
+                        {fourWeekReviewGoalIds.length > 0
+                          ? fourWeekReviewGoalIds.map((id) => userGoals.find((g) => g.id === id)?.title).filter(Boolean).join(", ") || "—"
+                          : "None"}
+                      </p>
+                    </div>
+                    {fourWeekReviewNotes && (
+                      <div>
+                        <p className="text-[11px] font-medium text-zinc-400">Anything to adjust</p>
+                        <p className="mt-1 text-sm text-zinc-200 whitespace-pre-wrap">{fourWeekReviewNotes}</p>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setFourWeekReviewEditMode(true)}
+                      className="rounded-full border border-zinc-600 bg-transparent px-4 py-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800/80"
                     >
-                      <option value="">None</option>
-                      {userGoals.filter((g) => g.active).map((g) => (
-                        <option key={g.id} value={g.id}>{g.title}</option>
-                      ))}
-                    </select>
+                      Edit submission
+                    </button>
                   </div>
-                  <div>
-                    <label className="block text-[11px] font-medium text-zinc-400">
-                      Anything to adjust in your systems? (optional)
-                    </label>
-                    <textarea
-                      value={fourWeekReviewNotes}
-                      onChange={(e) => setFourWeekReviewNotes(e.target.value)}
-                      rows={2}
-                      placeholder="What's working? What needs a tweak?"
-                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-500 focus:border-violet-600/50 focus:outline-none focus:ring-1 focus:ring-violet-600/50"
-                    />
+                ) : (
+                  <div className="mt-4 space-y-4">
+                    <div>
+                      <label className="block text-[11px] font-medium text-zinc-400">
+                        Which goals did this 4-week period support? (select all that apply)
+                      </label>
+                      <div className="mt-2 flex flex-col gap-2">
+                        {userGoals.filter((g) => g.active).map((g) => (
+                          <label key={g.id} className="flex cursor-pointer items-center gap-2 text-sm text-zinc-200">
+                            <input
+                              type="checkbox"
+                              checked={fourWeekReviewGoalIds.includes(g.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setFourWeekReviewGoalIds((prev) => [...prev, g.id]);
+                                } else {
+                                  setFourWeekReviewGoalIds((prev) => prev.filter((id) => id !== g.id));
+                                }
+                              }}
+                              className="rounded border-zinc-600 bg-zinc-800 text-violet-500 focus:ring-violet-500/50"
+                            />
+                            {g.title}
+                          </label>
+                        ))}
+                        {userGoals.filter((g) => g.active).length === 0 && (
+                          <p className="text-xs text-zinc-500">No active goals.</p>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium text-zinc-400">
+                        Anything to adjust in your systems? (optional)
+                      </label>
+                      <textarea
+                        value={fourWeekReviewNotes}
+                        onChange={(e) => setFourWeekReviewNotes(e.target.value)}
+                        rows={2}
+                        placeholder="What's working? What needs a tweak?"
+                        className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-500 focus:border-violet-600/50 focus:outline-none focus:ring-1 focus:ring-violet-600/50"
+                      />
+                    </div>
+                    {fourWeekReviewSaveError && (
+                      <p className="text-xs text-red-400">{fourWeekReviewSaveError}</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!supabase || !user || !periodEndDateForFourWeek) return;
+                        setFourWeekReviewSaving(true);
+                        setFourWeekReviewSaveError(null);
+                        try {
+                          await upsertFourWeekReview(supabase, user.id, periodEndDateForFourWeek, {
+                            goalIds: fourWeekReviewGoalIds,
+                            systemAdjustmentNotes: fourWeekReviewNotes.trim() || null,
+                          });
+                          setFourWeekReviewExists(true);
+                          setFourWeekReviewEditMode(false);
+                          setFourWeekReviewSavedAt(new Date().toISOString());
+                          const review = await loadFourWeekReview(supabase, user.id, periodEndDateForFourWeek);
+                          if (review?.updatedAt) setFourWeekReviewSavedAt(review.updatedAt);
+                        } catch (err) {
+                          const raw =
+                            (err && typeof err === "object" && "message" in err
+                              ? (err as { message: string }).message
+                              : err instanceof Error
+                                ? err.message
+                                : null) ?? "Failed to save";
+                          const hint =
+                            /goal_ids|column.*does not exist/i.test(raw)
+                              ? " Run the Supabase migration 006_four_week_reviews_goal_ids.sql and try again."
+                              : "";
+                          setFourWeekReviewSaveError(raw + hint);
+                        } finally {
+                          setFourWeekReviewSaving(false);
+                        }
+                      }}
+                      disabled={fourWeekReviewSaving}
+                      className="rounded-full bg-violet-600 px-4 py-2 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-50"
+                    >
+                      {fourWeekReviewSaving ? "Saving…" : "Save 4-week review"}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!supabase || !user || !periodEndDateForFourWeek) return;
-                      setFourWeekReviewSaving(true);
-                      upsertFourWeekReview(supabase, user.id, periodEndDateForFourWeek, {
-                        goalId: fourWeekReviewGoalId ?? null,
-                        systemAdjustmentNotes: fourWeekReviewNotes.trim() || null,
-                      })
-                        .catch(() => {})
-                        .finally(() => setFourWeekReviewSaving(false));
-                    }}
-                    disabled={fourWeekReviewSaving}
-                    className="rounded-full bg-violet-600 px-4 py-2 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-50"
-                  >
-                    {fourWeekReviewSaving ? "Saving…" : "Save 4-week review"}
-                  </button>
-                </div>
+                )}
               </div>
               )}
               <div className="mt-4 grid gap-3 sm:grid-cols-2">

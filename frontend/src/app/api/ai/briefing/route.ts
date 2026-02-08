@@ -50,7 +50,7 @@ function buildUserPrompt(ctx: AIBriefingRequest): string {
 
   sections.push(`Today: ${ctx.today}`);
   sections.push(`Morning flow status: ${ctx.morningFlowStatus}`);
-  sections.push(`Identity score: ${ctx.identityScore}/5`);
+  sections.push(`Identity score (yesterday, 5 daily checks): ${ctx.identityScore}/5 — use this for context; the user has not yet completed today's checks.`);
 
   if (ctx.goals.length > 0) {
     sections.push(

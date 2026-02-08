@@ -49,7 +49,7 @@ function buildUserPrompt(ctx: Focus3AIRequest): string {
   const sections: string[] = [];
 
   sections.push(`Today: ${ctx.today} (${ctx.weekday})`);
-  sections.push(`Identity score: ${ctx.identityScore}/5`);
+  sections.push(`Identity score (yesterday, 5 daily checks): ${ctx.identityScore}/5 — today's checks not yet completed.`);
 
   if (ctx.goals.length > 0) {
     sections.push(
@@ -85,7 +85,7 @@ function buildUserPrompt(ctx: Focus3AIRequest): string {
     { key: "curiositySpark", label: "Curiosity spark", done: ctx.identityMetrics.curiositySpark },
   ];
   sections.push(
-    `Identity metrics:\n${identityOptions.map((q) => `- id="identity-${q.key}" | ${q.label} | ${q.done ? "already checked" : "not yet checked"}`).join("\n")}`
+    `Identity metrics (yesterday — use for context; today's not yet done):\n${identityOptions.map((q) => `- id="identity-${q.key}" | ${q.label} | ${q.done ? "checked yesterday" : "not checked yesterday"}`).join("\n")}`
   );
 
   if (ctx.latestReflection) {
