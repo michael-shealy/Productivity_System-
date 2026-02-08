@@ -198,7 +198,7 @@ export async function loadGoals(
 
   if (!data) return [];
   return data.map((row) => ({
-    id: row.slug,
+    id: row.id,
     title: row.title,
     domain: row.domain,
     description: row.description,
@@ -454,7 +454,7 @@ export async function upsertWeeklyReflection(
   weekStartDate: string,
   payload: UpsertWeeklyReflectionPayload
 ): Promise<void> {
-  await supabase.from("weekly_reflections").upsert(
+  const { error } = await supabase.from("weekly_reflections").upsert(
     {
       user_id: userId,
       week_start_date: weekStartDate,
@@ -464,8 +464,9 @@ export async function upsertWeeklyReflection(
       capability_growth: payload.capabilityGrowth,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: "user_id,week_start_date" }
+    { onConflict: ["user_id", "week_start_date"] }
   );
+  if (error) throw error;
 }
 
 export async function loadLatestWeeklyReflection(
@@ -556,25 +557,42 @@ export async function loadFourWeekReview(
   supabase: SupabaseClient,
   userId: string,
   periodEndDate: string
-): Promise<{ periodEndDate: string; goalId: string | null; systemAdjustmentNotes: string | null; reflectionSummary: string | null } | null> {
+): Promise<{ periodEndDate: string; goalIds: string[]; systemAdjustmentNotes: string | null; reflectionSummary: string | null; updatedAt?: string } | null> {
   const { data } = await supabase
     .from("four_week_reviews")
-    .select("period_end_date, goal_id, system_adjustment_notes, reflection_summary")
+    .select("period_end_date, goal_ids, system_adjustment_notes, reflection_summary, updated_at")
     .eq("user_id", userId)
     .eq("period_end_date", periodEndDate)
     .single();
 
   if (!data) return null;
+  const goalIds = Array.isArray(data.goal_ids) ? (data.goal_ids as string[]) : [];
   return {
     periodEndDate: data.period_end_date,
-    goalId: data.goal_id,
+    goalIds,
     systemAdjustmentNotes: data.system_adjustment_notes,
     reflectionSummary: data.reflection_summary,
+    updatedAt: data.updated_at,
   };
 }
 
+/** Load the previous 4-week period's review (for "last period you noted" snippet). */
+export async function loadPreviousFourWeekReview(
+  supabase: SupabaseClient,
+  userId: string,
+  currentPeriodEndDate: string
+): Promise<{ systemAdjustmentNotes: string | null } | null> {
+  const current = new Date(currentPeriodEndDate + "T12:00:00");
+  const prevEnd = new Date(current);
+  prevEnd.setDate(prevEnd.getDate() - 28);
+  const prevKey = prevEnd.toISOString().slice(0, 10);
+  const review = await loadFourWeekReview(supabase, userId, prevKey);
+  if (!review) return null;
+  return { systemAdjustmentNotes: review.systemAdjustmentNotes };
+}
+
 export type UpsertFourWeekReviewPayload = {
-  goalId?: string | null;
+  goalIds?: string[];
   systemAdjustmentNotes?: string | null;
   reflectionSummary?: string | null;
 };
@@ -585,17 +603,18 @@ export async function upsertFourWeekReview(
   periodEndDate: string,
   payload: UpsertFourWeekReviewPayload
 ): Promise<void> {
-  await supabase.from("four_week_reviews").upsert(
+  const { error } = await supabase.from("four_week_reviews").upsert(
     {
       user_id: userId,
       period_end_date: periodEndDate,
-      goal_id: payload.goalId ?? null,
+      goal_ids: payload.goalIds ?? [],
       system_adjustment_notes: payload.systemAdjustmentNotes ?? null,
       reflection_summary: payload.reflectionSummary ?? null,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id,period_end_date" }
   );
+  if (error) throw error;
 }
 
 // ── OAuth Status ──────────────────────────────────────────────────────

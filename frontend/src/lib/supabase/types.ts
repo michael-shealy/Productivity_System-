@@ -128,7 +128,7 @@ export type DbUserPreferences = {
 
 export type FourWeekReview = {
   periodEndDate: string;
-  goalId: string | null;
+  goalIds: string[];
   systemAdjustmentNotes: string | null;
   reflectionSummary: string | null;
 };
@@ -138,7 +138,7 @@ export type DbFourWeekReview = {
   user_id: string;
   period_end_date: string;
   reflection_summary: string | null;
-  goal_id: string | null;
+  goal_ids: string[];
   system_adjustment_notes: string | null;
   created_at: string;
   updated_at: string;
