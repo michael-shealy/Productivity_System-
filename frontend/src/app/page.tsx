@@ -34,6 +34,7 @@ import {
 } from "@/lib/supabase/data";
 import type { WeeklyReflection, UserPreferences } from "@/lib/supabase/types";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
+import ChatPanel from "@/components/ChatPanel";
 
 export default function Home() {
   const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
@@ -102,6 +103,7 @@ export default function Home() {
   >([]);
   const [selectedCalendarIds, setSelectedCalendarIds] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<"practice" | "tasks">("practice");
+  const [chatOpen, setChatOpen] = useState(false);
   const [identityMetrics, setIdentityMetrics] = useState({
     morningGrounding: false,
     embodiedMovement: false,
@@ -2354,13 +2356,26 @@ export default function Home() {
             <p className="text-sm uppercase tracking-[0.2em] text-zinc-400">
               Daily System
             </p>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="rounded-full border border-zinc-800 px-3 py-1 text-xs text-zinc-500 hover:text-zinc-300"
-            >
-              Sign out
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setChatOpen((v) => !v)}
+                className={`rounded-full border px-3 py-1 text-xs transition ${
+                  chatOpen
+                    ? "border-indigo-700 bg-indigo-900/30 text-indigo-300"
+                    : "border-zinc-800 text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                Chat
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="rounded-full border border-zinc-800 px-3 py-1 text-xs text-zinc-500 hover:text-zinc-300"
+              >
+                Sign out
+              </button>
+            </div>
           </div>
           <h1 className="text-3xl font-semibold tracking-tight">
             Morning Briefing + Plan
@@ -5186,6 +5201,30 @@ export default function Home() {
           </>
         )}
       </main>
+      {supabase && user && (
+        <ChatPanel
+          isOpen={chatOpen}
+          onClose={() => setChatOpen(false)}
+          supabase={supabase}
+          userId={user.id}
+          todayKey={todayKey}
+          goals={userGoals}
+          tasks={todoistTasks}
+          completedTasks={completedTodayTasks}
+          events={calendarEvents}
+          habits={habits}
+          habitSessions={habitSessions}
+          identityMetrics={identityMetrics}
+          yesterdayIdentityMetrics={yesterdayIdentityMetrics}
+          focus3={focus3Items}
+          morningFlowStatus={morningFlowStatus}
+          latestReflection={latestWeeklyReflection}
+          aiTone={userPreferences?.aiTone}
+          onTasksChanged={() => loadTodoist(true)}
+          onEventsChanged={() => loadCalendar(true)}
+          onHabitSessionAdded={(session) => setHabitSessions((prev) => [session, ...prev])}
+        />
+      )}
     </div>
   );
 }
