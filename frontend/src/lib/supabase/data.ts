@@ -56,6 +56,33 @@ export async function saveIdentityMetrics(
   );
 }
 
+export async function loadLatestIdentityMetricsBeforeDate(
+  supabase: SupabaseClient,
+  userId: string,
+  date: string
+): Promise<{ date: string; metrics: IdentityMetrics } | null> {
+  const { data } = await supabase
+    .from("daily_identity_metrics")
+    .select("date, morning_grounding, embodied_movement, nutritional_awareness, present_connection, curiosity_spark")
+    .eq("user_id", userId)
+    .lt("date", date)
+    .order("date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!data) return null;
+  return {
+    date: data.date as string,
+    metrics: {
+      morningGrounding: data.morning_grounding as boolean,
+      embodiedMovement: data.embodied_movement as boolean,
+      nutritionalAwareness: data.nutritional_awareness as boolean,
+      presentConnection: data.present_connection as boolean,
+      curiositySpark: data.curiosity_spark as boolean,
+    },
+  };
+}
+
 // ── Morning Flow ──────────────────────────────────────────────────────
 
 type MorningFlowData = {

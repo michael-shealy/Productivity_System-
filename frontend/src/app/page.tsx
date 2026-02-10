@@ -9,6 +9,7 @@ import { useAIBriefing } from "@/lib/useAIBriefing";
 import { createClient } from "@/lib/supabase/client";
 import {
   loadIdentityMetrics,
+  loadLatestIdentityMetricsBeforeDate,
   saveIdentityMetrics,
   loadMorningFlow,
   saveMorningFlow,
@@ -108,6 +109,18 @@ export default function Home() {
     presentConnection: false,
     curiositySpark: false,
   });
+  const [identityViewDateKey, setIdentityViewDateKey] = useState<string>(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
+  const [identityViewMetrics, setIdentityViewMetrics] = useState<{
+    morningGrounding: boolean;
+    embodiedMovement: boolean;
+    nutritionalAwareness: boolean;
+    presentConnection: boolean;
+    curiositySpark: boolean;
+  } | null>(null);
+  const [identityViewLoading, setIdentityViewLoading] = useState(false);
   /** Yesterday's identity metrics — used for AI briefing/insights so the day's checks aren't used before the user has had time to complete them. */
   const [yesterdayIdentityMetrics, setYesterdayIdentityMetrics] = useState<{
     morningGrounding: boolean;
@@ -179,6 +192,13 @@ export default function Home() {
   // Debounce timers for Supabase saves
   const identitySaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const morningFlowSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const identityMetricsCache = useRef<Record<string, {
+    morningGrounding: boolean;
+    embodiedMovement: boolean;
+    nutritionalAwareness: boolean;
+    presentConnection: boolean;
+    curiositySpark: boolean;
+  }>>({});
 
   // Auth check + initial data load from Supabase
   useEffect(() => {
@@ -200,16 +220,21 @@ export default function Home() {
       // Load all daily data in parallel (today + yesterday for identity metrics used by AI)
       const today = new Date();
       const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayKey = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
 
-      const [goalsData, habitsData, sessionsData, metricsData, yesterdayMetricsData, flowData, focus3Data] = await Promise.all([
+      const [
+        goalsData,
+        habitsData,
+        sessionsData,
+        metricsData,
+        latestIdentityBeforeToday,
+        flowData,
+        focus3Data,
+      ] = await Promise.all([
         loadGoals(sb, authUser.id),
         loadHabits(sb, authUser.id),
         loadHabitSessions(sb, authUser.id),
         loadIdentityMetrics(sb, authUser.id, dateKey),
-        loadIdentityMetrics(sb, authUser.id, yesterdayKey),
+        loadLatestIdentityMetricsBeforeDate(sb, authUser.id, dateKey),
         loadMorningFlow(sb, authUser.id, dateKey),
         loadFocus3(sb, authUser.id, dateKey),
       ]);
@@ -220,7 +245,9 @@ export default function Home() {
       if (habitsData.length) setHabits(habitsData);
       if (sessionsData.length) setHabitSessions(sessionsData);
       if (metricsData) setIdentityMetrics(metricsData);
-      if (yesterdayMetricsData) setYesterdayIdentityMetrics(yesterdayMetricsData);
+      if (latestIdentityBeforeToday?.metrics) {
+        setYesterdayIdentityMetrics(latestIdentityBeforeToday.metrics);
+      }
       if (flowData) {
         setMorningFlowStatus(flowData.status);
         setMorningFlowSteps(flowData.steps);
@@ -394,6 +421,18 @@ export default function Home() {
   const today = new Date();
   const todayKey = toDateKey(today);
 
+  const isIdentityViewToday = identityViewDateKey === todayKey;
+  const identityViewActive = isIdentityViewToday
+    ? identityMetrics
+    : identityViewMetrics ?? {
+        morningGrounding: false,
+        embodiedMovement: false,
+        nutritionalAwareness: false,
+        presentConnection: false,
+        curiositySpark: false,
+      };
+  const identityViewScore = Object.values(identityViewActive).filter(Boolean).length;
+
   const dueTodayTasks = useMemo(() => {
     if (!hasTodoist) return [];
     return sortedTasks.filter((task) => {
@@ -502,6 +541,30 @@ export default function Home() {
     },
   ];
 
+  const toggleIdentityMetric = (key: string) => {
+    if (isIdentityViewToday) {
+      setIdentityMetrics((prev) => ({
+        ...prev,
+        [key]: !prev[key as keyof typeof prev],
+      }));
+    } else {
+      setIdentityViewMetrics((prev) => {
+        const current = prev ?? {
+          morningGrounding: false,
+          embodiedMovement: false,
+          nutritionalAwareness: false,
+          presentConnection: false,
+          curiositySpark: false,
+        };
+        const updated = { ...current, [key]: !current[key as keyof typeof current] };
+        identityMetricsCache.current[identityViewDateKey] = updated;
+        if (supabase && user) {
+          saveIdentityMetrics(supabase, user.id, identityViewDateKey, updated).catch(() => {});
+        }
+        return updated;
+      });
+    }
+  };
 
   const briefingCopy = (() => {
     const taskCount = dueTodayTasks.length + completedTodayTasks.length;
@@ -737,6 +800,38 @@ export default function Home() {
       saveIdentityMetrics(supabase, user.id, todayKey, identityMetrics).catch(() => {});
     }, 500);
   }, [identityMetrics, todayKey, supabase, user]);
+
+  // Load identity metrics when viewing a past date
+  useEffect(() => {
+    if (identityViewDateKey === todayKey) {
+      setIdentityViewMetrics(null);
+      return;
+    }
+    const cached = identityMetricsCache.current[identityViewDateKey];
+    if (cached) {
+      setIdentityViewMetrics(cached);
+      return;
+    }
+    if (!supabase || !user) return;
+    let cancelled = false;
+    setIdentityViewLoading(true);
+    loadIdentityMetrics(supabase, user.id, identityViewDateKey).then((data) => {
+      if (cancelled) return;
+      const metrics = data ?? {
+        morningGrounding: false,
+        embodiedMovement: false,
+        nutritionalAwareness: false,
+        presentConnection: false,
+        curiositySpark: false,
+      };
+      identityMetricsCache.current[identityViewDateKey] = metrics;
+      setIdentityViewMetrics(metrics);
+      setIdentityViewLoading(false);
+    }).catch(() => {
+      if (!cancelled) setIdentityViewLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [identityViewDateKey, todayKey, supabase, user]);
 
   const currentWeekKey = useMemo(() => getWeekStartKey(new Date()), [todayKey]);
 
@@ -1255,6 +1350,14 @@ export default function Home() {
       const yesterdayDate = new Date(todayDate);
       yesterdayDate.setDate(yesterdayDate.getDate() - 1);
       const yesterdayKey = toDateKey(yesterdayDate);
+      const todayKey = toDateKey(todayDate);
+
+      // If anything has been logged for this habit today, we treat "today" as part of the streak/data window.
+      // Otherwise, we evaluate all streak/adherence metrics as of yesterday, so an unlogged morning
+      // doesn't appear as a broken streak.
+      const hasAnyLogToday = (totalsByDay.get(todayKey) ?? 0) > 0;
+      const metricsEndDate = hasAnyLogToday ? todayDate : yesterdayDate;
+      const metricsEndKey = hasAnyLogToday ? todayKey : yesterdayKey;
 
       const countDaysBetween = (start: Date, end: Date) => {
         const diff = end.getTime() - start.getTime();
@@ -1298,9 +1401,11 @@ export default function Home() {
       const successMonthsCount = successMonths.size;
       const successYearsCount = successYears.size;
 
-      // Historic metrics exclude today (day may not be complete yet)
-      const successDaysExcludingToday = Array.from(successDayKeys).filter(
-        (key) => key <= yesterdayKey
+      // Historic metrics are evaluated up through the metricsEndDate:
+      // - If nothing has been logged today, this is yesterday.
+      // - If something has been logged today, this is today.
+      const successDaysThroughEnd = Array.from(successDayKeys).filter(
+        (key) => key <= metricsEndKey
       ).length;
       const successWeeksExcludingCurrent = Array.from(successWeekKeys).filter(
         (key) => {
@@ -1313,17 +1418,17 @@ export default function Home() {
       ).length;
 
       const totalPeriods = isDaily
-        ? countDaysBetween(startDate, yesterdayDate)
+        ? countDaysBetween(startDate, metricsEndDate)
         : countWeeksBetween(startDate, yesterdayDate);
       const successPeriods = isDaily
-        ? successDaysExcludingToday
+        ? successDaysThroughEnd
         : successWeeksExcludingCurrent;
       const adherencePercent =
         totalPeriods > 0 ? Math.round((successPeriods / totalPeriods) * 100) : 0;
 
-      const last365Start = new Date(yesterdayDate);
+      const last365Start = new Date(metricsEndDate);
       last365Start.setDate(last365Start.getDate() - 364);
-      const currentYearStart = new Date(yesterdayDate.getFullYear(), 0, 1);
+      const currentYearStart = new Date(metricsEndDate.getFullYear(), 0, 1);
 
       const countSuccessInRange = (
         keys: Set<string>,
@@ -1344,7 +1449,7 @@ export default function Home() {
       const totalLast365 = isDaily
         ? countDaysBetween(
             startDate > last365Start ? startDate : last365Start,
-            yesterdayDate
+            metricsEndDate
           )
         : countWeeksBetween(
             startDate > last365Start ? startDate : last365Start,
@@ -1353,7 +1458,7 @@ export default function Home() {
       const totalCurrentYear = isDaily
         ? countDaysBetween(
             startDate > currentYearStart ? startDate : currentYearStart,
-            yesterdayDate
+            metricsEndDate
           )
         : countWeeksBetween(
             startDate > currentYearStart ? startDate : currentYearStart,
@@ -1361,7 +1466,7 @@ export default function Home() {
           );
 
       const successLast365 = isDaily
-        ? countSuccessInRange(successDayKeys, last365Start, yesterdayDate)
+        ? countSuccessInRange(successDayKeys, last365Start, metricsEndDate)
         : (() => {
             let n = 0;
             successWeekKeys.forEach((key) => {
@@ -1374,7 +1479,7 @@ export default function Home() {
             return n;
           })();
       const successCurrentYear = isDaily
-        ? countSuccessInRange(successDayKeys, currentYearStart, yesterdayDate)
+        ? countSuccessInRange(successDayKeys, currentYearStart, metricsEndDate)
         : (() => {
             let n = 0;
             successWeekKeys.forEach((key) => {
@@ -1404,7 +1509,7 @@ export default function Home() {
       const getActiveStreak = () => {
         if (isDaily) {
           let streak = 0;
-          const cursor = new Date(todayDate);
+          const cursor = new Date(metricsEndDate);
           while (true) {
             const key = toDateKey(cursor);
             if (!successDayKeys.has(key)) break;
@@ -1430,7 +1535,7 @@ export default function Home() {
           let longest = 0;
           let current = 0;
           const cursor = new Date(startDate);
-          while (cursor <= todayDate) {
+          while (cursor <= metricsEndDate) {
             const key = toDateKey(cursor);
             if (successDayKeys.has(key)) {
               current += 1;
@@ -1486,10 +1591,10 @@ export default function Home() {
         totalsByYear,
         isDaily,
         startDate,
-        totalDays: countDaysBetween(startDate, todayDate),
-        totalWeeks: countWeeksBetween(startDate, todayDate),
-        totalMonths: countMonthsBetween(startDate, todayDate),
-        totalYears: countYearsBetween(startDate, todayDate),
+        totalDays: countDaysBetween(startDate, metricsEndDate),
+        totalWeeks: countWeeksBetween(startDate, metricsEndDate),
+        totalMonths: countMonthsBetween(startDate, metricsEndDate),
+        totalYears: countYearsBetween(startDate, metricsEndDate),
       };
     });
   }, [activeHabits, habitSessionsById, last7Days]);
@@ -2604,7 +2709,7 @@ export default function Home() {
             </div>
           </section>
 
-            <section className="rounded-2xl border border-indigo-900/40 bg-zinc-900/80 p-5 shadow-sm backdrop-blur">
+            <section id="identity-check" className="rounded-2xl border border-indigo-900/40 bg-zinc-900/80 p-5 shadow-sm backdrop-blur">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h2 className="text-lg font-semibold">Daily Identity Check</h2>
@@ -2613,22 +2718,78 @@ export default function Home() {
                   </p>
                 </div>
                 <div className="rounded-full border border-indigo-900/50 bg-indigo-500/10 px-3 py-1 text-sm text-indigo-200">
-                  {identityScore}/5 today
+                  {identityViewScore}/5{isIdentityViewToday ? " today" : ""}
                 </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-indigo-900/40 bg-zinc-950/40 px-3 py-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                  Viewing
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date(identityViewDateKey + "T12:00:00");
+                      d.setDate(d.getDate() - 1);
+                      setIdentityViewDateKey(
+                        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+                      );
+                    }}
+                    className="rounded border border-indigo-800/60 bg-indigo-500/10 px-2 py-1 text-xs text-indigo-200 hover:bg-indigo-500/20"
+                    aria-label="Previous day"
+                  >
+                    ←
+                  </button>
+                  <span className="min-w-[8rem] text-center text-sm text-zinc-200">
+                    {isIdentityViewToday
+                      ? "Today"
+                      : new Date(identityViewDateKey + "T12:00:00").toLocaleDateString(
+                          [],
+                          {
+                            weekday: "short",
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          }
+                        )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date(identityViewDateKey + "T12:00:00");
+                      d.setDate(d.getDate() + 1);
+                      setIdentityViewDateKey(
+                        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+                      );
+                    }}
+                    disabled={identityViewDateKey >= todayKey}
+                    className="rounded border border-indigo-800/60 bg-indigo-500/10 px-2 py-1 text-xs text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50 disabled:hover:bg-indigo-500/10"
+                    aria-label="Next day"
+                  >
+                    →
+                  </button>
+                </div>
+                {!isIdentityViewToday && (
+                  <button
+                    type="button"
+                    onClick={() => setIdentityViewDateKey(todayKey)}
+                    className="rounded bg-indigo-500/20 px-2 py-1 text-xs font-medium text-indigo-200 hover:bg-indigo-500/30"
+                  >
+                    Today
+                  </button>
+                )}
+                {identityViewLoading && (
+                  <span className="text-[11px] text-zinc-400">Loading...</span>
+                )}
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-2">
                 {identityQuestions.map((question) => {
-                  const isActive = identityMetrics[question.key];
+                  const isActive = identityViewActive[question.key];
                   return (
                     <button
                       key={question.key}
                       type="button"
-                      onClick={() =>
-                        setIdentityMetrics((prev) => ({
-                          ...prev,
-                          [question.key]: !prev[question.key],
-                        }))
-                      }
+                      onClick={() => toggleIdentityMetric(question.key)}
                       className={`rounded-xl border px-3 py-3 text-left text-sm transition ${
                         isActive
                           ? "border-indigo-700/60 bg-indigo-500/10 text-indigo-100"
