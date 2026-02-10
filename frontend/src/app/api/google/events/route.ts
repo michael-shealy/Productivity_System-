@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { normalizeGoogleEvent } from "@/lib/contracts";
 import { getRouteUser } from "@/lib/supabase/route";
 import { getOAuthToken } from "@/lib/supabase/tokens";
+import { fetchGoogleCalendarEvents } from "@/lib/google-calendar";
 
 async function getGoogleToken() {
   const { supabase, user } = await getRouteUser();
@@ -16,56 +17,28 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Missing Google token" }, { status: 401 });
   }
 
-  const now = new Date();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const timeMin = startOfMonth.toISOString();
-  const timeMax = endOfMonth.toISOString();
-
-  const params = new URLSearchParams({
-    timeMin,
-    timeMax,
-    singleEvents: "true",
-    orderBy: "startTime",
-  });
-
   const { searchParams } = new URL(request.url);
+
+  // Support custom date range via query params, default to current month
+  let timeMin: string;
+  let timeMax: string;
+  if (searchParams.get("timeMin") && searchParams.get("timeMax")) {
+    timeMin = searchParams.get("timeMin")!;
+    timeMax = searchParams.get("timeMax")!;
+  } else {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    timeMin = startOfMonth.toISOString();
+    timeMax = endOfMonth.toISOString();
+  }
+
   const calendarIdsParam = searchParams.get("calendarIds");
   const calendarIds = calendarIdsParam
     ? calendarIdsParam.split(",").map((id) => id.trim()).filter(Boolean)
     : ["primary"];
 
-  const responses = await Promise.all(
-    calendarIds.map(async (calendarId) => {
-      const apiResponse = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
-          calendarId
-        )}/events?${params.toString()}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      if (!apiResponse.ok) {
-        const detail = await apiResponse.text();
-        console.error("Calendar fetch failed", {
-          status: apiResponse.status,
-          calendarId,
-          detail,
-        });
-        return { calendarId, error: detail, items: [] as Array<Record<string, unknown>> };
-      }
-
-      const data = (await apiResponse.json()) as {
-        items?: Array<Record<string, unknown>>;
-      };
-      const items = data.items ?? [];
-
-      return { calendarId, items };
-    })
-  );
-
-  const items = responses.flatMap((response) =>
-    response.items.map((event) => normalizeGoogleEvent(event as any, response.calendarId))
-  );
+  const items = await fetchGoogleCalendarEvents(token, timeMin, timeMax, calendarIds);
 
   return NextResponse.json({ items, calendars: calendarIds });
 }

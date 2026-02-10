@@ -491,7 +491,7 @@ export async function upsertWeeklyReflection(
       capability_growth: payload.capabilityGrowth,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: ["user_id", "week_start_date"] }
+    { onConflict: "user_id,week_start_date" }
   );
   if (error) throw error;
 }
@@ -660,4 +660,92 @@ export async function getOAuthStatus(
     todoist: providers.has("todoist"),
     google: providers.has("google"),
   };
+}
+
+// ── Chat Messages ─────────────────────────────────────────────────────
+
+export type ChatMessageContent = {
+  text: string;
+  toolUses?: Array<{
+    id: string;
+    name: string;
+    input: Record<string, unknown>;
+    status: "pending" | "confirmed" | "rejected" | "executing" | "executed" | "error";
+    result?: string;
+  }>;
+};
+
+export type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: ChatMessageContent;
+  createdAt: string;
+};
+
+export async function loadChatMessages(
+  supabase: SupabaseClient,
+  userId: string,
+  date: string
+): Promise<ChatMessage[]> {
+  const { data } = await supabase
+    .from("daily_chat_messages")
+    .select("id, role, content, created_at")
+    .eq("user_id", userId)
+    .eq("date", date)
+    .order("created_at", { ascending: true });
+
+  if (!data) return [];
+  return data.map((row) => ({
+    id: row.id,
+    role: row.role as "user" | "assistant",
+    content: row.content as ChatMessageContent,
+    createdAt: row.created_at,
+  }));
+}
+
+export async function saveChatMessage(
+  supabase: SupabaseClient,
+  userId: string,
+  date: string,
+  role: "user" | "assistant",
+  content: ChatMessageContent
+): Promise<ChatMessage | null> {
+  const { data, error } = await supabase
+    .from("daily_chat_messages")
+    .insert({ user_id: userId, date, role, content })
+    .select("id, role, content, created_at")
+    .single();
+
+  if (error || !data) return null;
+  return {
+    id: data.id,
+    role: data.role as "user" | "assistant",
+    content: data.content as ChatMessageContent,
+    createdAt: data.created_at,
+  };
+}
+
+export async function updateChatMessageContent(
+  supabase: SupabaseClient,
+  userId: string,
+  messageId: string,
+  content: ChatMessageContent
+): Promise<void> {
+  await supabase
+    .from("daily_chat_messages")
+    .update({ content })
+    .eq("id", messageId)
+    .eq("user_id", userId);
+}
+
+export async function deleteChatMessagesForDate(
+  supabase: SupabaseClient,
+  userId: string,
+  date: string
+): Promise<void> {
+  await supabase
+    .from("daily_chat_messages")
+    .delete()
+    .eq("user_id", userId)
+    .eq("date", date);
 }
