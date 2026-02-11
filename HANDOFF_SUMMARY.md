@@ -1,15 +1,11 @@
 # Handoff Summary (Productivity System Project)
 
 ## Context
-This repository is a productivity system frontend built in Next.js (App Router + Tailwind). The app integrates Todoist and Google Calendar, uses OAuth, normalizes data via data contracts, and provides a UI dashboard with tasks, calendar views, habit check-ins, and connection controls. The design must preserve the **identity vs productivity separation** (see `CURRENT_STATE_AND_REQUIREMENTS.md`).
+This repository is a productivity system frontend built in Next.js (App Router + Tailwind). The app integrates Todoist and Google Calendar, uses OAuth, normalizes data via data contracts, and provides a UI dashboard with tasks, calendar views, habit check-ins, and connection controls. The design must preserve the **identity vs productivity separation** (see `SYSTEM_DESIGN_OVERVIEW.md`).
 
-## Key Documents to Reference (Source of Truth)
-- `CURRENT_STATE_AND_REQUIREMENTS.md` (source of truth)
-- `Updated_Systems_Reference.md`
-- `Finalized_System_Architecture.md`
-- `Phase1_Review_Framework.md`
-- `ChatGPT_New_Years_Transcript.md`
-- `One_Month_Review_Summary.md`
+## Key Documents to Reference
+- `SYSTEM_DESIGN_OVERVIEW.md` — Core design philosophy and architecture overview
+- `PRD.md` — Product requirements and functional specifications
 
 ## Major Work Completed
 ### Frontend Setup
@@ -58,16 +54,16 @@ Added `frontend/src/lib/contracts.ts`:
   - Labels show "Task"/"Event" and prioritize diverse focus areas.
 - **Morning Briefing**:
   - Uses tasks/events to generate a curated briefing.
-  - Includes “Why this briefing” rationale.
+  - Includes "Why this briefing" rationale.
 - **Calendar Views**:
   - **Month view** (current month) full width with event snippets.
-  - **Today’s agenda**: shows today’s events only.
+  - **Today's agenda**: shows today's events only.
   - All-day events show "All day" (no incorrect time).
   - Agenda excludes events from the "Todoist" calendar.
   - Agenda uses Google color IDs (mapped to muted background styles).
 - **Calendar selection**:
   - Month view includes calendar checkbox pills ("Calendars shown").
-  - Default calendars: Personal Calendar, Wedding, user@example.com, Holidays Calendar.
+  - Calendars are chosen from whatever the Google Calendar API returns (for example, a primary calendar plus any others the user selects in the UI).
 - **Connections section**:
   - Connect buttons moved to top.
   - Create Task + Create Event forms remain in Connections.
@@ -109,7 +105,7 @@ Env:
 ## Remaining / Suggested Next Steps
 1) **Focus 3 + Morning Briefing refinement**:
    - Currently keyword-based heuristics.
-   - Should be upgraded to use structured goals/keystones from `CURRENT_STATE_AND_REQUIREMENTS.md`.
+   - Should be upgraded to use structured goals from user's Supabase data.
 2) **Identity vs productivity separation**:
    - Consider separate views/tabs for identity practices vs operational tasks.
 3) **UI polish**:
@@ -117,9 +113,9 @@ Env:
 4) **Bi-sync update/delete**:
    - Not implemented yet (create only).
 5) **Habit integration**:
-   - Habit data import from `export_1769475725439` not yet wired into UI.
+   - Historical habit data can be imported via scripts or Supabase dashboard; import functionality not yet wired into UI.
 
 ## Notes for Next Agent
-- User wants dark UI; keep “cool” feeling.
-- Focus 3 and Morning Briefing must be grounded in **identity goals** and **current systems**, not productivity metrics.
-- Use `CURRENT_STATE_AND_REQUIREMENTS.md` as the source of truth.
+- Keep dark UI with "cool" feeling.
+- Focus 3 and Morning Briefing must be grounded in **identity goals** and user-defined systems (stored in Supabase), not productivity metrics.
+- Refer to `SYSTEM_DESIGN_OVERVIEW.md` for core design principles.

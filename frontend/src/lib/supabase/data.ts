@@ -2,7 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Goal } from "@/lib/goals";
 import type { Habit, HabitSession } from "@/lib/habits";
 import type { AIBriefingResponse } from "@/lib/ai";
-import type { WeeklyReflection, UserPreferences } from "@/lib/supabase/types";
+import type {
+  WeeklyReflection,
+  UserPreferences,
+  IdentityProfile,
+} from "@/lib/supabase/types";
 
 // ── Identity Metrics ──────────────────────────────────────────────────
 
@@ -204,6 +208,49 @@ export async function deleteFocus3(
     .delete()
     .eq("user_id", userId)
     .eq("date", date);
+}
+
+// ── Identity Profile ─────────────────────────────────────────────────────
+
+export async function loadIdentityProfile(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<IdentityProfile | null> {
+  const { data } = await supabase
+    .from("identity_profiles")
+    .select(
+      "values_document, busy_day_protocol, recovery_protocol, comparison_protocol, phase_metadata"
+    )
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (!data) return null;
+  return {
+    valuesDocument: (data.values_document as string | null) ?? null,
+    busyDayProtocol: (data.busy_day_protocol as Record<string, unknown> | null) ?? null,
+    recoveryProtocol: (data.recovery_protocol as Record<string, unknown> | null) ?? null,
+    comparisonProtocol:
+      (data.comparison_protocol as Record<string, unknown> | null) ?? null,
+    phaseMetadata: (data.phase_metadata as Record<string, unknown> | null) ?? null,
+  };
+}
+
+export async function saveIdentityProfile(
+  supabase: SupabaseClient,
+  userId: string,
+  profile: IdentityProfile
+): Promise<void> {
+  await supabase.from("identity_profiles").upsert(
+    {
+      user_id: userId,
+      values_document: profile.valuesDocument,
+      busy_day_protocol: profile.busyDayProtocol,
+      recovery_protocol: profile.recoveryProtocol,
+      comparison_protocol: profile.comparisonProtocol,
+      phase_metadata: profile.phaseMetadata,
+    },
+    { onConflict: "user_id" }
+  );
 }
 
 // ── Goals ─────────────────────────────────────────────────────────────

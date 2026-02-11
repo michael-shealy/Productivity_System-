@@ -65,7 +65,7 @@ Copy `frontend/.env.example` to `frontend/.env.local` and fill in:
 
 **Goals** stored in `goals` table in Supabase. The `Goal` type is defined in `frontend/src/lib/goals.ts`. Seeded via `supabase/seed.sql`.
 
-**Habits + sessions** stored in `habits` and `habit_sessions` tables. Originally imported from CSV exports (`export_1770248675244/`), now seeded into the database.
+**Habits + sessions** stored in `habits` and `habit_sessions` tables. Historical data can be imported via one-off scripts in `scripts/` or the Supabase dashboard, but those exports should remain private and are not checked into this repo.
 
 ### Database Schema
 
@@ -102,22 +102,20 @@ All API routes verify Supabase auth and read OAuth tokens from the database.
 
 ## Critical Design Principles
 
-These are derived from `CURRENT_STATE_AND_REQUIREMENTS.md` (the source of truth):
+These principles are encoded in the public system design and should guide any changes:
 
-1. **Identity vs productivity separation**: Identity practices (morning ritual, exercise, learning blocks) must NEVER be in the same task list as operational tasks. They use different visualizations, interactions, and success metrics.
-2. **Non-punitive tone**: No streak pressure, no guilt messaging, no "behind" language. 70-80% adherence is the target, not "not quite 100%".
+1. **Identity vs productivity separation**: Identity practices (morning ritual, movement, learning blocks) must NEVER be in the same task list as operational tasks. They use different visualizations, interactions, and success metrics.
+2. **Non-punitive tone**: No streak pressure, no guilt messaging, no "behind" language. 70–80% adherence is the target, not "not quite 100%".
 3. **Minimum/normal/stretch tiers**: Every practice has three tiers. Minimums are legitimate, not failure states. The UI must make it easy to select minimum with no guilt.
-4. **5 daily identity metrics**: Morning grounding, embodied movement, nutritional awareness, present connection, curiosity spark. These are the primary success dashboard (stored in client state as `identityMetrics`, persisted to `daily_identity_metrics`).
-5. **Morning flow**: A guided sequence (briefing -> focus3 -> identity check -> habits) tracked in `morningFlowSteps` state, persisted to `daily_morning_flow`.
+4. **Daily identity metrics**: A small set of daily identity checks (e.g., grounding, movement, intentional choices, presence, curiosity) is the primary success dashboard, persisted per user.
+5. **Morning flow**: A guided sequence (briefing → focus3 → identity check → habits) tracked in state and persisted per day.
 6. **AI framing**: All AI suggestions must be identity-framed ("the person you are becoming"), cite specific data, and never use deficit language.
 
 ## Key Reference Documents
 
-- `CURRENT_STATE_AND_REQUIREMENTS.md` — **Source of truth** for all system specs, user context, and design philosophy
-- `PRD.md` — Original product requirements (stack, data model, integrations, milestones)
+- `SYSTEM_DESIGN_OVERVIEW.md` — Public-safe summary of system philosophy and architecture
+- `PRD.md` — Product requirements (stack, data model, integrations, milestones)
 - `HANDOFF_SUMMARY.md` — Summary of completed work, current state, and next steps
-- `Finalized_System_Architecture.md` — Final architecture post one-month review
-- `Perfectionism_Protocols.md` — Recovery protocols for comparison anxiety and all-or-nothing collapse
 
 ## Work Log Convention
 

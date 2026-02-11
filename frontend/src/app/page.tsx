@@ -54,7 +54,6 @@ export default function Home() {
   const [habitLoading, setHabitLoading] = useState(false);
   const [habitSaving, setHabitSaving] = useState(false);
   const [habitError, setHabitError] = useState<string | null>(null);
-  const [, setHabitSource] = useState("export_1770248675244");
   const [expandedHabitId, setExpandedHabitId] = useState<string | null>(null);
   const [habitLogInputs, setHabitLogInputs] = useState<
     Record<string, { amount: string; note: string }>
@@ -669,18 +668,9 @@ export default function Home() {
       };
       const calendars = payload.items ?? [];
       setGoogleCalendars(calendars);
-      let nextSelectedIds = selectedCalendarIds;
-      if (!selectedCalendarIds.length) {
-        const defaultNames = new Set([
-          "Personal Calendar",
-          "Personal Calendar",
-          "user@example.com",
-          "Holidays Calendar",
-        ]);
-        const defaults = calendars
-          .filter((item) => defaultNames.has(item.name))
-          .map((item) => item.id);
-        nextSelectedIds = defaults.length ? defaults : calendars.map((item) => item.id);
+      if (!selectedCalendarIds.length && calendars.length) {
+        const primary = calendars.find((item) => item.primary);
+        const nextSelectedIds = primary ? [primary.id] : calendars.map((item) => item.id);
         setSelectedCalendarIds(nextSelectedIds);
       }
     } catch (error) {
@@ -690,7 +680,7 @@ export default function Home() {
         );
       }
     }
-  }, [selectedCalendarIds.length]);
+  }, [selectedCalendarIds]);
 
   const loadCalendar = useCallback(
     async (silent = false) => {

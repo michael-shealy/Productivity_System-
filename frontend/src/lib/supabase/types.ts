@@ -143,3 +143,23 @@ export type DbFourWeekReview = {
   created_at: string;
   updated_at: string;
 };
+
+export type DbIdentityProfile = {
+  id: string;
+  user_id: string;
+  values_document: string | null;
+  busy_day_protocol: Record<string, unknown> | null;
+  recovery_protocol: Record<string, unknown> | null;
+  comparison_protocol: Record<string, unknown> | null;
+  phase_metadata: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type IdentityProfile = {
+  valuesDocument: string | null;
+  busyDayProtocol: Record<string, unknown> | null;
+  recoveryProtocol: Record<string, unknown> | null;
+  comparisonProtocol: Record<string, unknown> | null;
+  phaseMetadata: Record<string, unknown> | null;
+};
