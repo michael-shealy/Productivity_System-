@@ -13,7 +13,7 @@ Current tools (Todoist, Google Calendar, separate habit tracker, and static reso
 - Measurable alignment: each day’s top 3 tasks link to a goal or keystone system.
 
 ## 3) Primary User & Context
-**User:** Single-user, fully personalized system. graduate program schedule now, Employer work intensity later. Motivation is identity and consistency more than one-off milestones. Preference for grounding, non-punitive UX.
+**User:** Single-user, fully personalized system designed for individuals who want to align daily actions with their identity and values. Motivation is identity and consistency more than one-off milestones. Preference for grounding, non-punitive UX. The system adapts to any schedule, career path, or life context.
 
 **Constraints:**
 - Cloud-first storage
@@ -24,10 +24,10 @@ Current tools (Todoist, Google Calendar, separate habit tracker, and static reso
 
 ## 4) Core Domains (First-Class)
 1) **Identity & Values**: daily compass, grounding, anti‑perfectionism
-2) **Health**: movement, weight, nutrition, regulation
-3) **Learning & Curiosity**: graduate program engagement + external learning
-4) **Relationships**: partner, friendships, social containers
-5) **Career**: Employer prep, professional growth, technical confidence
+2) **Health**: movement, nutrition, regulation, physical well-being
+3) **Learning & Curiosity**: ongoing growth, skill development, intellectual engagement
+4) **Relationships**: partner, friendships, social connections, community
+5) **Career & Professional**: skill building, career development, professional growth
 **Domain balance:** daily/weekly emphasis can shift, but macro-level coverage across all domains is required.
 
 ## 5) Primary User Journeys (Single Flow)

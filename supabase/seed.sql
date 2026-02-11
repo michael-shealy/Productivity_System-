@@ -1,19 +1,26 @@
 -- ============================================================
+-- Generic seed helpers (public-safe)
 -- ============================================================
-
--- Seed goals (from frontend/src/lib/goals.ts)
-INSERT INTO public.goals (user_id, slug, title, domain, description, season, active, sort_order)
-VALUES
-  ('YOUR_USER_ID_HERE', 'health-fitness',   'Build a sustainable health & fitness foundation', 'Health & Fitness',           'Weight loss through calorie awareness, consistent movement (gym, running, walking), and embodied care rather than punishment.', 'Phase 1 — building minimums', true, 0),
-  ('YOUR_USER_ID_HERE', 'emotional-growth', 'Grow emotionally through identity-based practice', 'Emotional Growth',          'Daily grounding, presence, curiosity sparks, and identity check-ins that reinforce who I am becoming rather than what I produce.', 'Ongoing — daily practice', true, 1),
-  ('YOUR_USER_ID_HERE', 'marriage',         'Nurture my marriage and partnership',              'Marriage & Relationship',    'Intentional date nights, present connection with my partner, wedding planning momentum, and genuine care over performance.', 'Engaged — wedding season', true, 2),
-  ('YOUR_USER_ID_HERE', 'mba',             'Excel in my graduate program program',                          'graduate program',                        'Engage meaningfully with coursework, build professional skills, and leverage the graduate program network without losing balance.', 'Active enrollment', true, 3),
-  ('YOUR_USER_ID_HERE', 'bcg-career',      'Launch strong at Employer',                           'Career — Employer',             'Prepare for internship and career with technical skill building (Python, causal inference, ML), professional presence, and strategic learning.', 'Pre-internship prep', true, 4),
-  ('YOUR_USER_ID_HERE', 'relationships',   'Maintain meaningful relationships',                 'Relationships & Community',  'Stay connected with family, friends, and community through regular check-ins, social events, and genuine presence.', 'Ongoing', true, 5),
-  ('YOUR_USER_ID_HERE', 'daily-identity',  'Live from identity, not output',                    'Daily Identity',             'Anchor each day in values (presence, grounded confidence, curiosity) rather than productivity metrics. The system serves identity, not the reverse.', 'Core operating principle', true, 6)
-ON CONFLICT (user_id, slug) DO NOTHING;
-
--- To seed habits and habit_sessions from CSV exports, use a script or
--- import them via the Supabase dashboard CSV import feature. The CSV files
--- are in the repo at export_1770248675244/activities.csv and sessions.csv.
--- Map `id` from the CSV to `external_id` in the habits table.
+--
+-- This file intentionally does NOT insert any real-user goals or identity data.
+-- In a multi-user deployment, each authenticated user should create their own
+-- goals and practices via the app itself or via a dedicated onboarding flow.
+--
+-- If you want example content for local development, you can either:
+--   1) Insert a single demo user and some obviously fictitious goals, or
+--   2) Use the Supabase dashboard to import your own personal data into a
+--      private project that is not checked into version control.
+--
+-- Example (commented out) of how you might add generic sample goals:
+--
+-- INSERT INTO public.goals (user_id, slug, title, domain, description, season, active, sort_order)
+-- VALUES
+--   ('00000000-0000-0000-0000-000000000000', 'health-foundation', 'Build a sustainable health foundation', 'Health', 'Movement, sleep, and nutrition practices that feel sustainable.', 'Example season', true, 0),
+--   ('00000000-0000-0000-0000-000000000000', 'career-growth',     'Invest in long-term career skills',     'Career', 'Regular practice on skills that support the work you want to do.', 'Example season', true, 1),
+--   ('00000000-0000-0000-0000-000000000000', 'relationships',     'Deepen close relationships',             'Relationships', 'Simple practices that increase presence and connection.', 'Example season', true, 2)
+-- ON CONFLICT (user_id, slug) DO NOTHING;
+--
+-- For habit and habit_sessions imports, prefer using one-off scripts under
+-- the local `scripts/` directory or the Supabase dashboard CSV import feature.
+-- Those imports should point at your own private export paths and should not
+-- be committed to this repository.
