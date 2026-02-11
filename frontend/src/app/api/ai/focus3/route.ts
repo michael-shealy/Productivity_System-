@@ -100,14 +100,28 @@ function buildUserPrompt(ctx: Focus3AIRequest): string {
 }
 
 function parseResponse(text: string): Focus3AIResponse {
+  const attemptParse = (raw: string) => {
+    const trimmed = raw.trim();
+    const firstBrace = trimmed.indexOf("{");
+    const lastBrace = trimmed.lastIndexOf("}");
+    const core =
+      firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace
+        ? trimmed.slice(firstBrace, lastBrace + 1)
+        : trimmed;
+
+    // Fix common model mistakes like trailing commas before ] or }
+    const sanitized = core.replace(/,\s*([}\]])/g, "$1");
+    return JSON.parse(sanitized);
+  };
+
   try {
-    const parsed = JSON.parse(text);
-    return validateResponse(parsed);
+    const parsed = attemptParse(text);
+    return validateResponse(parsed as Record<string, unknown>);
   } catch {
     const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
     if (fenceMatch) {
-      const parsed = JSON.parse(fenceMatch[1]);
-      return validateResponse(parsed);
+      const parsed = attemptParse(fenceMatch[1]);
+      return validateResponse(parsed as Record<string, unknown>);
     }
     throw new Error("Could not parse AI response as JSON");
   }
