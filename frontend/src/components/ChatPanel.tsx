@@ -512,18 +512,29 @@ export default function ChatPanel({
 
   return (
     <div
-      className={`fixed right-0 top-0 bottom-0 z-50 flex w-[400px] flex-col border-l border-zinc-800 bg-zinc-950 transition-transform duration-300 ease-in-out ${
+      className={`overscroll-contain fixed right-0 top-0 bottom-0 z-50 flex w-full flex-col border-l border-zinc-800 bg-zinc-950 transition-transform duration-300 ease-in-out md:w-[400px] ${
         isOpen ? "translate-x-0" : "translate-x-full"
       }`}
+      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded p-1 text-zinc-400 hover:text-zinc-200 md:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            aria-label="Close chat"
+          >
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M13 4l-6 6 6 6" />
+            </svg>
+          </button>
           <h2 className="text-sm font-medium text-zinc-200">Chat</h2>
           <button
             type="button"
             onClick={handleClearChat}
-            className="rounded px-2 py-1 text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
+            className="rounded px-2 py-1.5 text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
           >
             Clear chat
           </button>
@@ -531,7 +542,8 @@ export default function ChatPanel({
         <button
           type="button"
           onClick={onClose}
-          className="rounded p-1 text-zinc-500 hover:text-zinc-300"
+          className="hidden min-h-[44px] min-w-[44px] items-center justify-center rounded p-1 text-zinc-500 hover:text-zinc-300 md:flex focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          aria-label="Close chat"
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M4 4l8 8M12 4l-8 8" />

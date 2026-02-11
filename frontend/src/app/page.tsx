@@ -35,6 +35,12 @@ import {
 import type { WeeklyReflection, UserPreferences } from "@/lib/supabase/types";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import ChatPanel from "@/components/ChatPanel";
+import DashboardHeader from "@/components/DashboardHeader";
+import MorningFlowBanner from "@/components/MorningFlowBanner";
+import InsightsSection from "@/components/InsightsSection";
+import IdentityCheck, { identityQuestions } from "@/components/IdentityCheck";
+import CalendarMonthView from "@/components/CalendarMonthView";
+import ConnectionsPanel from "@/components/ConnectionsPanel";
 
 export default function Home() {
   const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
@@ -511,37 +517,7 @@ export default function Home() {
     return cleaned || title.trim();
   };
 
-  const identityQuestions: Array<{
-    key: keyof typeof identityMetrics;
-    label: string;
-    helper: string;
-  }> = [
-    {
-      key: "morningGrounding",
-      label: "Did I start my day connected to my values?",
-      helper: "Morning grounding",
-    },
-    {
-      key: "embodiedMovement",
-      label: "Did I move in a way that felt good in my body?",
-      helper: "Embodied movement",
-    },
-    {
-      key: "nutritionalAwareness",
-      label: "Did I make intentional food choices, even if imperfect?",
-      helper: "Nutritional awareness",
-    },
-    {
-      key: "presentConnection",
-      label: "Did I have one moment of genuine presence?",
-      helper: "Present connection",
-    },
-    {
-      key: "curiositySpark",
-      label: "Did one thing make me genuinely curious?",
-      helper: "Curiosity spark",
-    },
-  ];
+  // identityQuestions imported from @/components/IdentityCheck
 
   const toggleIdentityMetric = (key: string) => {
     if (isIdentityViewToday) {
@@ -1705,7 +1681,7 @@ export default function Home() {
       type: "Identity",
       group: "Identity",
     })),
-  ], [dueTodayTasks, completedTodayTasks, todayAgendaEvents, activeHabits, identityQuestions]);
+  ], [dueTodayTasks, completedTodayTasks, todayAgendaEvents, activeHabits]);
 
   // Ref holds latest context so Focus 3 effect can read it without re-running when data updates (which would abort the request).
   const focus3ContextRef = useRef({
@@ -2224,204 +2200,28 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-zinc-950 via-slate-950 to-indigo-950 font-sans text-zinc-100">
-      <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-8">
-        {activeTab === "practice" && morningFlowStatus !== "complete" && (
-          <section className="rounded-2xl border border-indigo-900/50 bg-zinc-900/90 p-5 shadow-sm backdrop-blur">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-indigo-300/80">
-                  Morning flow
-                </p>
-                <h2 className="text-xl font-semibold">Begin your daily reset</h2>
-                <p className="mt-1 text-sm text-zinc-300">
-                  Ground, choose focus, check identity, then log a minimum practice.
-                </p>
-              </div>
-              <div className="rounded-full border border-indigo-800/60 bg-indigo-500/10 px-3 py-1 text-xs text-indigo-200">
-                {morningFlowStepCount}/{morningFlowTotalSteps} steps
-              </div>
-            </div>
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              {morningFlowStatus === "idle" && (
-                <button
-                  type="button"
-                  onClick={() => setMorningFlowStatus("in_progress")}
-                  className="rounded-full bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-400"
-                >
-                  Start morning flow
-                </button>
-              )}
-              {morningFlowStatus === "in_progress" && (
-                <button
-                  type="button"
-                  onClick={() => setMorningFlowStatus("in_progress")}
-                  className="rounded-full border border-indigo-700/60 px-4 py-2 text-xs text-indigo-200"
-                >
-                  Resume flow
-                </button>
-              )}
-              {morningFlowStatus === "in_progress" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!morningFlowComplete) return;
-                    setMorningFlowStatus("complete");
-                  }}
-                  className={`rounded-full px-4 py-2 text-xs font-medium text-white ${
-                    morningFlowComplete
-                      ? "bg-emerald-500 hover:bg-emerald-400"
-                      : "bg-emerald-500/30 text-emerald-200"
-                  }`}
-                  disabled={!morningFlowComplete}
-                >
-                  Mark flow complete
-                </button>
-              )}
-            </div>
-            {morningFlowStatus === "in_progress" && (
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {[
-                  {
-                    id: "briefing",
-                    label: "Read the morning briefing",
-                    helper: "Understand the day’s constraints and values reminder.",
-                    target: "#morning-briefing",
-                  },
-                  {
-                    id: "focus",
-                    label: "Set Focus 3",
-                    helper: "Pick what matters most, not what is loudest.",
-                    target: "#focus-3",
-                  },
-                  {
-                    id: "identity",
-                    label: "Complete the identity check",
-                    helper: "3–5 checks is a strong day.",
-                    target: "#identity-check",
-                  },
-                  {
-                    id: "habits",
-                    label: "Log a minimum practice",
-                    helper: "Log one small habit check-in to keep momentum.",
-                    target: "#habit-checkin",
-                  },
-                ].map((step) => {
-                  const isDone = morningFlowSteps[step.id as keyof typeof morningFlowSteps];
-                  return (
-                    <div
-                      key={step.id}
-                      className="rounded-xl border border-indigo-900/50 bg-indigo-500/10 px-3 py-3 text-sm text-indigo-100"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="font-medium">{step.label}</p>
-                          <p className="mt-1 text-xs text-indigo-100/80">{step.helper}</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setMorningFlowSteps((prev) => ({
-                              ...prev,
-                              [step.id]: !isDone,
-                            }))
-                          }
-                          className={`rounded-full border px-2 py-1 text-[11px] ${
-                            isDone
-                              ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-100"
-                              : "border-indigo-700/60 text-indigo-200"
-                          }`}
-                        >
-                          {isDone ? "Done" : "Mark done"}
-                        </button>
-                      </div>
-                      <div className="mt-2">
-                        <button
-                          type="button"
-                          onClick={() => scrollToSection(step.target.replace("#", ""))}
-                          className="text-[11px] text-indigo-200 underline-offset-2 hover:underline"
-                        >
-                          Jump to section
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
+      <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-4 sm:px-6 sm:py-8">
+        {activeTab === "practice" && (
+          <MorningFlowBanner
+            morningFlowStatus={morningFlowStatus}
+            setMorningFlowStatus={setMorningFlowStatus}
+            morningFlowSteps={morningFlowSteps}
+            setMorningFlowSteps={setMorningFlowSteps}
+            morningFlowStepCount={morningFlowStepCount}
+            morningFlowTotalSteps={morningFlowTotalSteps}
+            morningFlowComplete={morningFlowComplete}
+            scrollToSection={scrollToSection}
+          />
         )}
 
-        <header className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <p className="text-sm uppercase tracking-[0.2em] text-zinc-400">
-              Daily System
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setChatOpen((v) => !v)}
-                className={`rounded-full border px-3 py-1 text-xs transition ${
-                  chatOpen
-                    ? "border-indigo-700 bg-indigo-900/30 text-indigo-300"
-                    : "border-zinc-800 text-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                Chat
-              </button>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="rounded-full border border-zinc-800 px-3 py-1 text-xs text-zinc-500 hover:text-zinc-300"
-              >
-                Sign out
-              </button>
-            </div>
-          </div>
-          <h1 className="text-3xl font-semibold tracking-tight">
-            Morning Briefing + Plan
-          </h1>
-          <p className="text-sm text-zinc-400">
-            Calm, goal-aligned, and ready for check-ins anytime today.
-          </p>
-          {activeTab === "practice" && (
-            <div>
-              <button
-                type="button"
-                onClick={resetMorningFlow}
-                className="rounded-full border border-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:text-white"
-              >
-                Reset morning flow
-              </button>
-            </div>
-          )}
-        </header>
-
-        <div className="flex w-full items-center justify-start">
-          <div className="inline-flex rounded-full border border-zinc-800 bg-zinc-950/40 p-1 text-sm">
-            <button
-              type="button"
-              onClick={() => setActiveTab("practice")}
-              className={`rounded-full px-4 py-2 text-sm font-medium transition ${
-                activeTab === "practice"
-                  ? "bg-indigo-500/20 text-indigo-200"
-                  : "text-zinc-400 hover:text-zinc-200"
-              }`}
-            >
-              Practice
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("tasks")}
-              className={`rounded-full px-4 py-2 text-sm font-medium transition ${
-                activeTab === "tasks"
-                  ? "bg-emerald-500/20 text-emerald-200"
-                  : "text-zinc-400 hover:text-zinc-200"
-              }`}
-            >
-              Tasks
-            </button>
-          </div>
-        </div>
+        <DashboardHeader
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          chatOpen={chatOpen}
+          setChatOpen={setChatOpen}
+          handleLogout={handleLogout}
+          resetMorningFlow={resetMorningFlow}
+        />
 
         {activeTab === "practice" && (
           <>
@@ -2681,154 +2481,21 @@ export default function Home() {
               </div>
             </section>
 
-          <section className="rounded-2xl border border-indigo-900/40 bg-zinc-900/80 p-5 shadow-sm backdrop-blur">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h2 className="text-lg font-semibold">Insights</h2>
-                <p className="text-sm text-zinc-300">
-                  Calm, explainable nudges tied to your identity practices.
-                </p>
-              </div>
-              <span className="rounded-full border border-indigo-900/50 bg-indigo-500/10 px-3 py-1 text-xs text-indigo-200">
-                {aiBriefing.briefing?.insights ? "AI-assisted" : "Explainable only"}
-              </span>
-            </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {(() => {
-                const displayInsights = aiBriefing.briefing?.insights ?? practiceInsights;
-                if (displayInsights.length === 0) {
-                  return (
-                    <div className="rounded-xl border border-dashed border-indigo-900/60 bg-zinc-950/40 px-3 py-3 text-sm text-zinc-400">
-                      No insights yet. Add a few check-ins to activate suggestions.
-                    </div>
-                  );
-                }
-                return displayInsights.map((insight) => (
-                  <div
-                    key={insight.id}
-                    className="rounded-xl border border-indigo-900/50 bg-indigo-500/10 px-3 py-3 text-sm text-indigo-100"
-                  >
-                    <p className="font-medium">{insight.title}</p>
-                    <p className="mt-1 text-xs text-indigo-100/80">{insight.body}</p>
-                    <div className="mt-2 rounded-lg border border-indigo-900/60 bg-zinc-950/40 px-2 py-2 text-[11px] text-zinc-300">
-                      <p className="font-semibold text-indigo-200">Why this</p>
-                      <ul className="mt-1 space-y-1">
-                        {insight.why.map((reason, index) => (
-                          <li key={`${insight.id}-why-${index}`}>{reason}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                ));
-              })()}
-            </div>
-          </section>
+          <InsightsSection
+            aiBriefingInsights={aiBriefing.briefing?.insights}
+            practiceInsights={practiceInsights}
+          />
 
-            <section id="identity-check" className="rounded-2xl border border-indigo-900/40 bg-zinc-900/80 p-5 shadow-sm backdrop-blur">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h2 className="text-lg font-semibold">Daily Identity Check</h2>
-                  <p className="text-sm text-zinc-300">
-                    Success is showing up as who you&apos;re becoming.
-                  </p>
-                </div>
-                <div className="rounded-full border border-indigo-900/50 bg-indigo-500/10 px-3 py-1 text-sm text-indigo-200">
-                  {identityViewScore}/5{isIdentityViewToday ? " today" : ""}
-                </div>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-indigo-900/40 bg-zinc-950/40 px-3 py-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
-                  Viewing
-                </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const d = new Date(identityViewDateKey + "T12:00:00");
-                      d.setDate(d.getDate() - 1);
-                      setIdentityViewDateKey(
-                        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-                      );
-                    }}
-                    className="rounded border border-indigo-800/60 bg-indigo-500/10 px-2 py-1 text-xs text-indigo-200 hover:bg-indigo-500/20"
-                    aria-label="Previous day"
-                  >
-                    ←
-                  </button>
-                  <span className="min-w-[8rem] text-center text-sm text-zinc-200">
-                    {isIdentityViewToday
-                      ? "Today"
-                      : new Date(identityViewDateKey + "T12:00:00").toLocaleDateString(
-                          [],
-                          {
-                            weekday: "short",
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          }
-                        )}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const d = new Date(identityViewDateKey + "T12:00:00");
-                      d.setDate(d.getDate() + 1);
-                      setIdentityViewDateKey(
-                        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-                      );
-                    }}
-                    disabled={identityViewDateKey >= todayKey}
-                    className="rounded border border-indigo-800/60 bg-indigo-500/10 px-2 py-1 text-xs text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50 disabled:hover:bg-indigo-500/10"
-                    aria-label="Next day"
-                  >
-                    →
-                  </button>
-                </div>
-                {!isIdentityViewToday && (
-                  <button
-                    type="button"
-                    onClick={() => setIdentityViewDateKey(todayKey)}
-                    className="rounded bg-indigo-500/20 px-2 py-1 text-xs font-medium text-indigo-200 hover:bg-indigo-500/30"
-                  >
-                    Today
-                  </button>
-                )}
-                {identityViewLoading && (
-                  <span className="text-[11px] text-zinc-400">Loading...</span>
-                )}
-              </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {identityQuestions.map((question) => {
-                  const isActive = identityViewActive[question.key];
-                  return (
-                    <button
-                      key={question.key}
-                      type="button"
-                      onClick={() => toggleIdentityMetric(question.key)}
-                      className={`rounded-xl border px-3 py-3 text-left text-sm transition ${
-                        isActive
-                          ? "border-indigo-700/60 bg-indigo-500/10 text-indigo-100"
-                          : "border-zinc-800 bg-zinc-950/40 text-zinc-300 hover:border-indigo-800/60"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <span className="font-medium">{question.label}</span>
-                        <span
-                          className={`text-[11px] ${
-                            isActive ? "text-indigo-200" : "text-zinc-500"
-                          }`}
-                        >
-                          {question.helper}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="mt-3 text-xs text-zinc-400">
-                A strong day is 3–5 checks. Minimums still count.
-              </p>
-            </section>
+            <IdentityCheck
+              identityViewDateKey={identityViewDateKey}
+              setIdentityViewDateKey={setIdentityViewDateKey}
+              identityViewActive={identityViewActive}
+              identityViewScore={identityViewScore}
+              isIdentityViewToday={isIdentityViewToday}
+              identityViewLoading={identityViewLoading}
+              todayKey={todayKey}
+              toggleIdentityMetric={toggleIdentityMetric}
+            />
 
             <section
               id="habit-checkin"
@@ -2870,7 +2537,7 @@ export default function Home() {
                       );
                       setHabitError(null);
                     }}
-                    className="rounded border border-zinc-600 bg-zinc-800/80 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-700"
+                    className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded border border-zinc-600 bg-zinc-800/80 text-xs text-zinc-200 hover:bg-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                     aria-label="Previous day"
                   >
                     ←
@@ -2899,7 +2566,7 @@ export default function Home() {
                       setHabitError(null);
                     }}
                     disabled={habitViewDateKey >= todayKey}
-                    className="rounded border border-zinc-600 bg-zinc-800/80 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-700 disabled:opacity-50 disabled:hover:bg-zinc-800/80"
+                    className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded border border-zinc-600 bg-zinc-800/80 text-xs text-zinc-200 hover:bg-zinc-700 disabled:opacity-50 disabled:hover:bg-zinc-800/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                     aria-label="Next day"
                   >
                     →
@@ -3325,7 +2992,7 @@ export default function Home() {
                 )}
               </div>
               )}
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
                 {habitStats.length === 0 && (
                   <div className="rounded-lg border border-dashed border-amber-900/50 bg-zinc-950/40 px-3 py-3 text-xs text-zinc-400">
                     No habit history loaded yet.
@@ -4128,7 +3795,7 @@ export default function Home() {
                                   }))
                                 }
                               />
-                              <div className="grid grid-cols-2 gap-2">
+                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                                 <input
                                   className="w-full rounded-lg border border-indigo-900/50 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
                                   placeholder="Due (e.g., tomorrow 5pm)"
@@ -4163,7 +3830,7 @@ export default function Home() {
                                   }))
                                 }
                               />
-                              <div className="grid grid-cols-3 gap-2">
+                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                                 <select
                                   className="w-full rounded-lg border border-indigo-900/50 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
                                   value={taskEditForm.project_id}
@@ -4303,7 +3970,7 @@ export default function Home() {
                                   }))
                                 }
                               />
-                              <div className="grid grid-cols-2 gap-2">
+                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                                 <input
                                   className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
                                   placeholder="Due (e.g., tomorrow 5pm)"
@@ -4338,7 +4005,7 @@ export default function Home() {
                                   }))
                                 }
                               />
-                              <div className="grid grid-cols-3 gap-2">
+                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                                 <select
                                   className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
                                   value={taskEditForm.project_id}
@@ -4442,94 +4109,15 @@ export default function Home() {
                   </div>
                 </div>
               </div>
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6 shadow-sm backdrop-blur">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-semibold">Month view</h2>
-                  <span className="text-xs text-zinc-400">{monthLabel}</span>
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-300">
-                  <span className="font-semibold text-zinc-400">Calendars shown:</span>
-                  {googleCalendars.length === 0 && (
-                    <span className="text-zinc-400">No calendars loaded</span>
-                  )}
-                  {googleCalendars.map((calendar) => {
-                    const checked = selectedCalendarIds.includes(calendar.id);
-                    return (
-                      <label
-                        key={calendar.id}
-                        className={`flex items-center gap-2 rounded-full border px-2 py-1 ${
-                          checked
-                            ? "border-indigo-700/50 bg-indigo-500/10 text-indigo-200"
-                            : "border-zinc-800 bg-zinc-950/40 text-zinc-400"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => {
-                            setSelectedCalendarIds((prev) =>
-                              prev.includes(calendar.id)
-                                ? prev.filter((id) => id !== calendar.id)
-                                : [...prev, calendar.id]
-                            );
-                          }}
-                        />
-                        <span>{calendar.name}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-                <div className="mt-3 grid grid-cols-7 gap-2 text-sm text-zinc-400">
-                  {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
-                    <span key={`${day}-${index}`} className="text-center font-semibold">
-                      {day}
-                    </span>
-                  ))}
-                </div>
-                <div className="mt-2 grid grid-cols-7 gap-2 text-sm text-zinc-200">
-                  {Array.from({ length: monthDays.startOffset }).map((_, index) => (
-                    <div key={`empty-${index}`} className="h-20" />
-                  ))}
-                  {Array.from({ length: monthDays.daysInMonth }).map((_, index) => {
-                    const dayNumber = index + 1;
-                    const dateKey = `${monthDays.year}-${String(
-                      monthDays.month + 1
-                    ).padStart(2, "0")}-${String(dayNumber).padStart(2, "0")}`;
-                    const events = eventsByDate.get(dateKey) ?? [];
-                    const isToday = dateKey === todayKey;
-                    return (
-                      <div
-                        key={dateKey}
-                        className={`h-20 rounded-lg border px-2 py-1 ${
-                          isToday
-                            ? "border-indigo-700/60 bg-indigo-500/10"
-                            : "border-zinc-800 bg-zinc-950/40"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="font-semibold">{dayNumber}</span>
-                          {events.length > 0 && (
-                            <span className="text-xs text-indigo-300">
-                              {events.length}
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-1 space-y-1">
-                          {events.slice(0, 2).map((event) => (
-                            <div
-                              key={event.id}
-                              className="truncate text-[10px] text-zinc-300"
-                              title={event.title}
-                            >
-                              {event.title}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+              <CalendarMonthView
+                monthDays={monthDays}
+                monthLabel={monthLabel}
+                todayKey={todayKey}
+                eventsByDate={eventsByDate}
+                googleCalendars={googleCalendars}
+                selectedCalendarIds={selectedCalendarIds}
+                setSelectedCalendarIds={setSelectedCalendarIds}
+              />
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5 shadow-sm backdrop-blur">
                 <div className="flex items-center justify-between">
                   <h2 className="text-lg font-semibold">Today’s agenda</h2>
@@ -4565,7 +4153,7 @@ export default function Home() {
                           }))
                         }
                       />
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         <input
                           className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
                           type="datetime-local"
@@ -4694,510 +4282,67 @@ export default function Home() {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5 shadow-sm backdrop-blur">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold">Connections</h2>
-                  <p className="text-sm text-zinc-300">
-                    Link accounts to load real tasks and events.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    className="rounded-full bg-indigo-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-400"
-                    onClick={connectTodoist}
-                    type="button"
-                  >
-                    Connect Todoist
-                  </button>
-                  <button
-                    className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-400"
-                    onClick={connectGoogle}
-                    type="button"
-                  >
-                    Connect Google Calendar
-                  </button>
-                </div>
-              </div>
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-4 py-3 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold">Todoist</span>
-                    <button
-                      className="text-xs font-medium text-indigo-300 hover:text-indigo-200"
-                      onClick={() => loadTodoist()}
-                      type="button"
-                    >
-                      {todoistLoading ? "Loading..." : "Load tasks"}
-                    </button>
-                  </div>
-                  {todoistError ? (
-                    <p className="mt-2 text-xs text-rose-400">{todoistError}</p>
-                  ) : (
-                    <p className="mt-2 text-xs text-zinc-400">
-                      {todoistTasks.length
-                        ? `${todoistTasks.length} tasks loaded`
-                        : "No tasks loaded yet"}
-                    </p>
-                  )}
-                  <ul className="mt-3 space-y-2">
-                    {todoistTasks.slice(0, 5).map((task) => (
-                      <li
-                        key={task.id}
-                        className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-200"
-                      >
-                      {editingTaskId === task.id ? (
-                        <div className="mt-2 grid gap-2 text-xs text-zinc-200">
-                          <input
-                            className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                            value={taskEditForm.content}
-                            onChange={(event) =>
-                              setTaskEditForm((prev) => ({
-                                ...prev,
-                                content: event.target.value,
-                              }))
-                            }
-                          />
-                          <input
-                            className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                            placeholder="Description"
-                            value={taskEditForm.description}
-                            onChange={(event) =>
-                              setTaskEditForm((prev) => ({
-                                ...prev,
-                                description: event.target.value,
-                              }))
-                            }
-                          />
-                          <div className="grid grid-cols-2 gap-2">
-                            <input
-                              className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                              placeholder="Due (e.g., tomorrow 5pm)"
-                              value={taskEditForm.due_string}
-                              onChange={(event) =>
-                                setTaskEditForm((prev) => ({
-                                  ...prev,
-                                  due_string: event.target.value,
-                                }))
-                              }
-                            />
-                            <input
-                              className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                              placeholder="Priority (1-4)"
-                              value={taskEditForm.priority}
-                              onChange={(event) =>
-                                setTaskEditForm((prev) => ({
-                                  ...prev,
-                                  priority: event.target.value,
-                                }))
-                              }
-                            />
-                          </div>
-                          <input
-                            className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                            placeholder="Labels (comma)"
-                            value={taskEditForm.labels}
-                            onChange={(event) =>
-                              setTaskEditForm((prev) => ({
-                                ...prev,
-                                labels: event.target.value,
-                              }))
-                            }
-                          />
-                          <div className="grid grid-cols-3 gap-2">
-                            <select
-                              className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                              value={taskEditForm.project_id}
-                              onChange={(event) =>
-                                setTaskEditForm((prev) => ({
-                                  ...prev,
-                                  project_id: event.target.value,
-                                }))
-                              }
-                            >
-                              <option value="">Project (optional)</option>
-                              {todoistProjects.map((project) => (
-                                <option key={project.id} value={project.id}>
-                                  {project.name}
-                                </option>
-                              ))}
-                            </select>
-                            <input
-                              className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                              placeholder="Section ID"
-                              value={taskEditForm.section_id}
-                              onChange={(event) =>
-                                setTaskEditForm((prev) => ({
-                                  ...prev,
-                                  section_id: event.target.value,
-                                }))
-                              }
-                            />
-                            <input
-                              className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                              placeholder="Parent ID"
-                              value={taskEditForm.parent_id}
-                              onChange={(event) =>
-                                setTaskEditForm((prev) => ({
-                                  ...prev,
-                                  parent_id: event.target.value,
-                                }))
-                              }
-                            />
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              className="rounded-lg bg-indigo-500 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-400"
-                              onClick={saveTodoistTaskEdits}
-                            >
-                              Save
-                            </button>
-                            <button
-                              type="button"
-                              className="rounded-lg border border-zinc-800 px-3 py-2 text-xs text-zinc-300 hover:text-white"
-                              onClick={cancelTodoistTaskEdits}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium">{task.title}</span>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              className="text-[11px] text-indigo-300 hover:text-indigo-200"
-                              onClick={() => updateTodoistTask(task)}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="text-[11px] text-emerald-300 hover:text-emerald-200"
-                              onClick={() => completeTodoistTask(task.id)}
-                            >
-                              Complete
-                            </button>
-                            <button
-                              type="button"
-                              className="text-[11px] text-rose-300 hover:text-rose-200"
-                              onClick={() => deleteTodoistTask(task.id)}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="mt-4 border-t border-zinc-800 pt-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                      Create task
-                    </p>
-                    <div className="mt-2 grid gap-2">
-                      <input
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500"
-                        placeholder="Task title"
-                        value={newTaskContent}
-                        onChange={(event) => setNewTaskContent(event.target.value)}
-                      />
-                      <input
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500"
-                        placeholder="Description"
-                        value={newTaskDescription}
-                        onChange={(event) => setNewTaskDescription(event.target.value)}
-                      />
-                      <input
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500"
-                        placeholder="Due (e.g., tomorrow 5pm)"
-                        value={newTaskDueString}
-                        onChange={(event) => setNewTaskDueString(event.target.value)}
-                      />
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500"
-                          placeholder="Priority (1-4)"
-                          value={newTaskPriority}
-                          onChange={(event) => setNewTaskPriority(event.target.value)}
-                        />
-                        <input
-                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500"
-                          placeholder="Labels (comma)"
-                          value={newTaskLabels}
-                          onChange={(event) => setNewTaskLabels(event.target.value)}
-                        />
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        <select
-                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                          value={newTaskProjectId}
-                          onChange={(event) => setNewTaskProjectId(event.target.value)}
-                        >
-                          <option value="">Project (optional)</option>
-                          {todoistProjects.map((project) => (
-                            <option key={project.id} value={project.id}>
-                              {project.name}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500"
-                          placeholder="Section ID"
-                          value={newTaskSectionId}
-                          onChange={(event) => setNewTaskSectionId(event.target.value)}
-                        />
-                        <input
-                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500"
-                          placeholder="Parent ID"
-                          value={newTaskParentId}
-                          onChange={(event) => setNewTaskParentId(event.target.value)}
-                        />
-                      </div>
-                      <button
-                        className="rounded-lg bg-indigo-500 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-400"
-                        type="button"
-                        onClick={createTodoistTask}
-                        disabled={todoistCreateLoading}
-                      >
-                        {todoistCreateLoading ? "Creating..." : "Add task"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-4 py-3 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold">Google Calendar</span>
-                    <button
-                      className="text-xs font-medium text-emerald-300 hover:text-emerald-200"
-                      onClick={() => loadCalendar()}
-                      type="button"
-                    >
-                      {calendarLoading ? "Loading..." : "Load events"}
-                    </button>
-                  </div>
-                  {calendarError ? (
-                    <p className="mt-2 text-xs text-rose-400">{calendarError}</p>
-                  ) : (
-                    <p className="mt-2 text-xs text-zinc-400">
-                      {calendarEvents.length
-                        ? `${calendarEvents.length} events loaded`
-                        : "No events loaded yet"}
-                    </p>
-                  )}
-                  <ul className="mt-3 space-y-2">
-                    {calendarEvents.slice(0, 5).map((event) => (
-                      <li
-                        key={event.id}
-                        className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-200"
-                      >
-                    {editingEventId === event.id ? (
-                      <div className="mt-2 grid gap-2 text-xs text-zinc-100">
-                        <input
-                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                          placeholder="Event title"
-                          value={eventEditForm.summary}
-                          onChange={(eventInput) =>
-                            setEventEditForm((prev) => ({
-                              ...prev,
-                              summary: eventInput.target.value,
-                            }))
-                          }
-                        />
-                        <div className="grid grid-cols-2 gap-2">
-                          <input
-                            className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                            type="datetime-local"
-                            value={eventEditForm.start}
-                            onChange={(eventInput) =>
-                              setEventEditForm((prev) => ({
-                                ...prev,
-                                start: eventInput.target.value,
-                              }))
-                            }
-                          />
-                          <input
-                            className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                            type="datetime-local"
-                            value={eventEditForm.end}
-                            onChange={(eventInput) =>
-                              setEventEditForm((prev) => ({
-                                ...prev,
-                                end: eventInput.target.value,
-                              }))
-                            }
-                          />
-                        </div>
-                        <input
-                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                          placeholder="Location"
-                          value={eventEditForm.location}
-                          onChange={(eventInput) =>
-                            setEventEditForm((prev) => ({
-                              ...prev,
-                              location: eventInput.target.value,
-                            }))
-                          }
-                        />
-                        <select
-                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                          value={eventEditForm.calendarId}
-                          onChange={(eventInput) =>
-                            setEventEditForm((prev) => ({
-                              ...prev,
-                              calendarId: eventInput.target.value,
-                            }))
-                          }
-                        >
-                          <option value="">Select calendar</option>
-                          {googleCalendars.map((calendar) => (
-                            <option key={calendar.id} value={calendar.id}>
-                              {calendar.name}
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                          value={eventEditForm.colorId}
-                          onChange={(eventInput) =>
-                            setEventEditForm((prev) => ({
-                              ...prev,
-                              colorId: eventInput.target.value,
-                            }))
-                          }
-                        >
-                          <option value="">Default color</option>
-                          <option value="1">Lavender</option>
-                          <option value="2">Sage</option>
-                          <option value="3">Grape</option>
-                          <option value="4">Flamingo</option>
-                          <option value="5">Banana</option>
-                          <option value="6">Tangerine</option>
-                          <option value="7">Peacock</option>
-                          <option value="8">Graphite</option>
-                          <option value="9">Blueberry</option>
-                          <option value="10">Basil</option>
-                          <option value="11">Tomato</option>
-                        </select>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-400"
-                            onClick={saveCalendarEventEdits}
-                          >
-                            Save
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded-lg border border-zinc-800 px-3 py-2 text-xs text-zinc-200 hover:text-white"
-                            onClick={cancelCalendarEventEdits}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium">{event.title ?? "Untitled event"}</span>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            className="text-[11px] text-emerald-300 hover:text-emerald-200"
-                            onClick={() => updateCalendarEvent(event)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="text-[11px] text-rose-300 hover:text-rose-200"
-                            onClick={() => deleteCalendarEvent(event)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="mt-4 border-t border-zinc-800 pt-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                      Create event
-                    </p>
-                    <div className="mt-2 grid gap-2">
-                      <select
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                        value={selectedCalendarIds[0] ?? ""}
-                        onChange={(event) =>
-                          setSelectedCalendarIds(
-                            event.target.value ? [event.target.value] : []
-                          )
-                        }
-                      >
-                        <option value="">Select calendar</option>
-                        {googleCalendars.map((calendar) => (
-                          <option key={calendar.id} value={calendar.id}>
-                            {calendar.name}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500"
-                        placeholder="Event title"
-                        value={newEventTitle}
-                        onChange={(event) => setNewEventTitle(event.target.value)}
-                      />
-                      <input
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                        type="datetime-local"
-                        value={newEventStart}
-                        onChange={(event) => setNewEventStart(event.target.value)}
-                      />
-                      <input
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                        type="datetime-local"
-                        value={newEventEnd}
-                        onChange={(event) => setNewEventEnd(event.target.value)}
-                      />
-                      <input
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500"
-                        placeholder="Location (optional)"
-                        value={newEventLocation}
-                        onChange={(event) => setNewEventLocation(event.target.value)}
-                      />
-                      <select
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
-                        value={newEventColor}
-                        onChange={(event) => setNewEventColor(event.target.value)}
-                      >
-                        <option value="">Default color</option>
-                        <option value="1">Lavender</option>
-                        <option value="2">Sage</option>
-                        <option value="3">Grape</option>
-                        <option value="4">Flamingo</option>
-                        <option value="5">Banana</option>
-                        <option value="6">Tangerine</option>
-                        <option value="7">Peacock</option>
-                        <option value="8">Graphite</option>
-                        <option value="9">Blueberry</option>
-                        <option value="10">Basil</option>
-                        <option value="11">Tomato</option>
-                      </select>
-                      <button
-                        className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-400"
-                        type="button"
-                        onClick={createCalendarEvent}
-                        disabled={calendarCreateLoading}
-                      >
-                        {calendarCreateLoading ? "Creating..." : "Add event"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
+            <ConnectionsPanel
+              connectTodoist={connectTodoist}
+              connectGoogle={connectGoogle}
+              loadTodoist={loadTodoist}
+              loadCalendar={loadCalendar}
+              todoistLoading={todoistLoading}
+              calendarLoading={calendarLoading}
+              todoistError={todoistError}
+              calendarError={calendarError}
+              todoistCreateLoading={todoistCreateLoading}
+              calendarCreateLoading={calendarCreateLoading}
+              todoistTasks={todoistTasks}
+              calendarEvents={calendarEvents}
+              todoistProjects={todoistProjects}
+              googleCalendars={googleCalendars}
+              selectedCalendarIds={selectedCalendarIds}
+              setSelectedCalendarIds={setSelectedCalendarIds}
+              editingTaskId={editingTaskId}
+              taskEditForm={taskEditForm}
+              setTaskEditForm={setTaskEditForm}
+              updateTodoistTask={updateTodoistTask}
+              saveTodoistTaskEdits={saveTodoistTaskEdits}
+              cancelTodoistTaskEdits={cancelTodoistTaskEdits}
+              completeTodoistTask={completeTodoistTask}
+              deleteTodoistTask={deleteTodoistTask}
+              createTodoistTask={createTodoistTask}
+              newTaskContent={newTaskContent}
+              setNewTaskContent={setNewTaskContent}
+              newTaskDescription={newTaskDescription}
+              setNewTaskDescription={setNewTaskDescription}
+              newTaskDueString={newTaskDueString}
+              setNewTaskDueString={setNewTaskDueString}
+              newTaskPriority={newTaskPriority}
+              setNewTaskPriority={setNewTaskPriority}
+              newTaskLabels={newTaskLabels}
+              setNewTaskLabels={setNewTaskLabels}
+              newTaskProjectId={newTaskProjectId}
+              setNewTaskProjectId={setNewTaskProjectId}
+              newTaskSectionId={newTaskSectionId}
+              setNewTaskSectionId={setNewTaskSectionId}
+              newTaskParentId={newTaskParentId}
+              setNewTaskParentId={setNewTaskParentId}
+              editingEventId={editingEventId}
+              eventEditForm={eventEditForm}
+              setEventEditForm={setEventEditForm}
+              updateCalendarEvent={updateCalendarEvent}
+              saveCalendarEventEdits={saveCalendarEventEdits}
+              cancelCalendarEventEdits={cancelCalendarEventEdits}
+              deleteCalendarEvent={deleteCalendarEvent}
+              createCalendarEvent={createCalendarEvent}
+              newEventTitle={newEventTitle}
+              setNewEventTitle={setNewEventTitle}
+              newEventStart={newEventStart}
+              setNewEventStart={setNewEventStart}
+              newEventEnd={newEventEnd}
+              setNewEventEnd={setNewEventEnd}
+              newEventLocation={newEventLocation}
+              setNewEventLocation={setNewEventLocation}
+              newEventColor={newEventColor}
+              setNewEventColor={setNewEventColor}
+            />
           </>
         )}
       </main>
