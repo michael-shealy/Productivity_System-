@@ -260,9 +260,6 @@ export default function Home() {
         setMorningFlowStatus(flowData.status);
         setMorningFlowSteps(flowData.steps);
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:init',message:'focus3 after load',data:{focus3DataNull:!focus3Data,itemsLength:focus3Data?.items?.length,settingSubmitted:!!(focus3Data?.items?.length)},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
       if (focus3Data?.items?.length) {
         setFocus3Items(focus3Data.items);
         setFocus3Reasoning(focus3Data.aiReasoning ?? "");
@@ -1715,9 +1712,6 @@ export default function Home() {
   useEffect(() => {
     const ctx = focus3ContextRef.current;
     const hasData = ctx.dueTodayTasks.length > 0 || ctx.todayAgendaEvents.length > 0 || ctx.habitStats.length > 0;
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:focus3Effect',message:'effect run',data:{focus3Status,focus3DataLoaded,focus3AiLoading,hasData,habitStatsLen:ctx.habitStats.length,dueToday:ctx.dueTodayTasks.length,todayEvents:ctx.todayAgendaEvents.length,willSkipGuard:!(focus3Status==='loading'&&focus3DataLoaded&&!focus3AiLoading),willSkipHasData:!hasData},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
     if (focus3Status !== "loading" || !focus3DataLoaded || focus3AiLoading) return;
     if (!hasData) return;
 
@@ -1756,9 +1750,6 @@ export default function Home() {
       aiTone: ctx.aiTone,
     };
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:focus3Fetch',message:'calling API',data:{},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
     fetch("/api/ai/focus3", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1766,9 +1757,6 @@ export default function Home() {
       signal: abortController.signal,
     })
       .then(async (res) => {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:focus3Response',message:'API response',data:{ok:res.ok,status:res.status},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-        // #endregion
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.detail ?? body.error ?? "AI Focus 3 generation failed");
@@ -1777,18 +1765,12 @@ export default function Home() {
       })
       .then((data: { items: Array<{ id: string; label: string; type: string }>; reasoning: string }) => {
         if (abortController.signal.aborted) return;
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:focus3Success',message:'set proposing',data:{itemsLen:data?.items?.length},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
-        // #endregion
         setFocus3Draft(data.items.length ? data.items : []);
         setFocus3Reasoning(data.reasoning ?? "");
         setFocus3Status("proposing");
       })
       .catch((err) => {
         if (abortController.signal.aborted) return;
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:focus3Catch',message:'API error',data:{errMsg:err?.message},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-        // #endregion
         setFocus3AiError(err instanceof Error ? err.message : "Failed to generate Focus 3");
         // Fall back to manual mode — set proposing with empty draft
         setFocus3Draft([

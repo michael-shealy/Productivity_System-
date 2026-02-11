@@ -49,58 +49,7 @@ async function executeReadOnlyTool(
     const timeMin = timeMinDate.toISOString();
     const timeMax = timeMaxDate.toISOString();
 
-    // #region agent log
-    fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: `log_${Date.now()}_get_events_bounds`,
-        runId: "pre-fix",
-        hypothesisId: "H1",
-        location: "frontend/src/app/api/ai/chat/route.ts:executeReadOnlyTool",
-        message: "get_events input dates and computed UTC bounds",
-        data: {
-          startDate,
-          endDate,
-          daysDiff,
-          timeMin,
-          timeMax,
-          startWeekdayUtc: timeMinDate.getUTCDay(),
-          endWeekdayUtc: timeMaxDate.getUTCDay(),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion agent log
-
     const events = await fetchGoogleCalendarEvents(googleAccessToken, timeMin, timeMax);
-
-    // #region agent log
-    fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: `log_${Date.now()}_get_events_result`,
-        runId: "pre-fix",
-        hypothesisId: "H2",
-        location: "frontend/src/app/api/ai/chat/route.ts:executeReadOnlyTool",
-        message: "get_events normalized events sample",
-        data: {
-          startDate,
-          endDate,
-          count: events.length,
-          sample: events.slice(0, 5).map((e) => ({
-            id: e.id,
-            start: e.start?.dateTime ?? e.start?.date ?? null,
-            end: e.end?.dateTime ?? e.end?.date ?? null,
-            allDay: !e.start?.dateTime,
-            calendarId: e.calendarId,
-          })),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion agent log
 
     const summary = events.map((e) => ({
       id: e.id,

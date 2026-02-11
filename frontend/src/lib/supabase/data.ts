@@ -169,10 +169,6 @@ export async function loadFocus3(
     .eq("date", date)
     .maybeSingle();
 
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'data.ts:loadFocus3',message:'loadFocus3 result',data:{hasData:!!data,errorCode:error?.code,errorMessage:error?.message,itemsLength:data?.items?.length},timestamp:Date.now(),hypothesisId:'H2',runId:'post-fix'})}).catch(()=>{});
-  // #endregion
-
   if (!data) return null;
   return {
     items: data.items as Focus3Item[],

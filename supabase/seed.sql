@@ -1,7 +1,4 @@
 -- ============================================================
--- Seed script for Productivity System
--- Run AFTER creating your user account in Supabase Auth dashboard.
--- Replace YOUR_USER_ID_HERE with your actual auth.users UUID.
 -- ============================================================
 
 -- Seed goals (from frontend/src/lib/goals.ts)

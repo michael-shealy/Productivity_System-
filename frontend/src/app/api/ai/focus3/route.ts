@@ -149,22 +149,14 @@ function validateResponse(obj: Record<string, unknown>): Focus3AIResponse {
   return { items, reasoning };
 }
 
-const DEBUG_LOG = (msg: string, data: Record<string, unknown>) => {
-  fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "api/ai/focus3/route.ts", message: msg, data, timestamp: Date.now(), hypothesisId: "H3" }) }).catch(() => {});
-};
-
 export async function POST(request: Request) {
   const { user } = await getRouteUser();
-  // #region agent log
-  DEBUG_LOG("POST entry", { hasUser: !!user });
-  // #endregion
   if (!user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    DEBUG_LOG("no API key", {});
     return NextResponse.json(
       { error: "ANTHROPIC_API_KEY not configured" },
       { status: 503 }
@@ -175,27 +167,21 @@ export async function POST(request: Request) {
   let rawBody: string;
   try {
     rawBody = await request.text();
-  } catch (e) {
-    DEBUG_LOG("body read error", { err: String(e) });
+  } catch {
     return NextResponse.json({ error: "Failed to read request body" }, { status: 400 });
   }
   if (!rawBody?.trim()) {
-    DEBUG_LOG("empty body", {});
     return NextResponse.json({ error: "Request body is empty" }, { status: 400 });
   }
   try {
     ctx = JSON.parse(rawBody) as Focus3AIRequest;
   } catch {
-    DEBUG_LOG("invalid JSON", { bodyLen: rawBody.length, preview: rawBody.slice(0, 100) });
     return NextResponse.json({ error: "Invalid JSON in request body" }, { status: 400 });
   }
 
   const client = new Anthropic({ apiKey });
 
   try {
-    // #region agent log
-    DEBUG_LOG("calling Anthropic", {});
-    // #endregion
     const message = await client.messages.create({
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 512,
@@ -217,15 +203,9 @@ export async function POST(request: Request) {
     }
 
     const focus3 = parseResponse(textBlock.text);
-    // #region agent log
-    DEBUG_LOG("success", { itemsLen: focus3.items.length });
-    // #endregion
     return NextResponse.json(focus3);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown error";
-    // #region agent log
-    DEBUG_LOG("catch", { detail });
-    // #endregion
     console.error("AI Focus 3 generation failed", error);
     return NextResponse.json(
       { error: "AI Focus 3 generation failed", detail },
