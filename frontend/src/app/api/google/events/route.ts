@@ -104,25 +104,6 @@ export async function POST(request: Request) {
       calendarId,
       detail,
     });
-    // #region agent log
-    fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: `log_${Date.now()}_google_create_error`,
-        runId: "pre-fix",
-        hypothesisId: "G1",
-        location: "frontend/src/app/api/google/events/route.ts:POST",
-        message: "Google Calendar create failed",
-        data: {
-          status: apiResponse.status,
-          calendarId,
-          detail,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion agent log
     return NextResponse.json(
       { error: "Calendar create failed", detail },
       { status: apiResponse.status === 429 ? 429 : 500 }
