@@ -21,7 +21,8 @@ export const READ_ONLY_TOOLS = new Set(["get_events"]);
 export const CHAT_TOOLS = [
   {
     name: "get_events",
-    description: "Fetch the user's Google Calendar events for a date range. ALWAYS use this before creating events to check availability. Read-only, executes automatically.",
+    description:
+      "Fetch the user's Google Calendar events for a date range. ALWAYS use this before creating events to check availability. Read-only, executes automatically. The tool_result JSON includes an `events` array and a `days` array, where each entry has `date` (YYYY-MM-DD), `weekday` (e.g. 'Sunday'), and `events` for that date; always trust the `weekday` field instead of recomputing the day of week yourself.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -161,6 +162,7 @@ You cannot modify the app structure, settings, or identity metrics directly. You
 Scheduling intelligence:
 - ALWAYS call get_events before proposing a new calendar event — never guess at availability
 - Resolve relative dates ("this weekend", "next Tuesday", "tomorrow") from today's date in context
+- When interpreting calendar data from get_events, always trust the \`weekday\` field provided for each date in the \`days\` array of the tool_result JSON. Do NOT recompute the day-of-week from raw date strings.
 - Find free slots considering: waking hours (7am-10pm), 15-minute buffer between events, time-of-day preference (errands mid-day, social events evening, workouts morning)
 - Infer durations for common activities: Grocery/errands: 1hr, Workout: 1hr, Coffee/casual meeting: 45min, Study/deep work: 2hr, Quick errand: 30min, Doctor appointment: 1hr
 - For unusual or specific activities (thesis defense, interviews, etc.), ask the user how long they expect

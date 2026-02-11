@@ -44,10 +44,63 @@ async function executeReadOnlyTool(
       return JSON.stringify({ error: "Date range must be 0-30 days." });
     }
 
-    const timeMin = new Date(startDate + "T00:00:00Z").toISOString();
-    const timeMax = new Date(endDate + "T23:59:59Z").toISOString();
+    const timeMinDate = new Date(startDate + "T00:00:00Z");
+    const timeMaxDate = new Date(endDate + "T23:59:59Z");
+    const timeMin = timeMinDate.toISOString();
+    const timeMax = timeMaxDate.toISOString();
+
+    // #region agent log
+    fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: `log_${Date.now()}_get_events_bounds`,
+        runId: "pre-fix",
+        hypothesisId: "H1",
+        location: "frontend/src/app/api/ai/chat/route.ts:executeReadOnlyTool",
+        message: "get_events input dates and computed UTC bounds",
+        data: {
+          startDate,
+          endDate,
+          daysDiff,
+          timeMin,
+          timeMax,
+          startWeekdayUtc: timeMinDate.getUTCDay(),
+          endWeekdayUtc: timeMaxDate.getUTCDay(),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion agent log
 
     const events = await fetchGoogleCalendarEvents(googleAccessToken, timeMin, timeMax);
+
+    // #region agent log
+    fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: `log_${Date.now()}_get_events_result`,
+        runId: "pre-fix",
+        hypothesisId: "H2",
+        location: "frontend/src/app/api/ai/chat/route.ts:executeReadOnlyTool",
+        message: "get_events normalized events sample",
+        data: {
+          startDate,
+          endDate,
+          count: events.length,
+          sample: events.slice(0, 5).map((e) => ({
+            id: e.id,
+            start: e.start?.dateTime ?? e.start?.date ?? null,
+            end: e.end?.dateTime ?? e.end?.date ?? null,
+            allDay: !e.start?.dateTime,
+            calendarId: e.calendarId,
+          })),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion agent log
 
     const summary = events.map((e) => ({
       id: e.id,
@@ -58,7 +111,44 @@ async function executeReadOnlyTool(
       calendarId: e.calendarId,
     }));
 
-    return JSON.stringify({ events: summary, count: summary.length });
+    // Group events by calendar date and attach ground-truth weekday labels
+    const dayMap = new Map<
+      string,
+      {
+        date: string;
+        weekday: string;
+        events: typeof summary;
+      }
+    >();
+
+    for (const ev of summary) {
+      if (!ev.start) continue;
+      // Derive the calendar date portion (YYYY-MM-DD) regardless of datetime vs date-only.
+      const dateStr = ev.start.slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
+
+      let day = dayMap.get(dateStr);
+      if (!day) {
+        // Use noon UTC to avoid any timezone edge cases when computing weekday.
+        const d = new Date(dateStr + "T12:00:00Z");
+        const weekday = d.toLocaleDateString("en-US", { weekday: "long" });
+        day = { date: dateStr, weekday, events: [] };
+        dayMap.set(dateStr, day);
+      }
+      day.events.push(ev);
+    }
+
+    const days = Array.from(dayMap.values()).sort((a, b) =>
+      a.date.localeCompare(b.date)
+    );
+
+    return JSON.stringify({
+      startDate,
+      endDate,
+      count: summary.length,
+      events: summary,
+      days,
+    });
   }
 
   return JSON.stringify({ error: `Unknown tool: ${toolName}` });
