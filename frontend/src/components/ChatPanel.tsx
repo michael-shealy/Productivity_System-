@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { TaskContract, CalendarEventContract } from "@/lib/contracts";
 import type { Goal } from "@/lib/goals";
@@ -556,7 +557,13 @@ export default function ChatPanel({
                   : "mr-8 bg-zinc-900 text-zinc-300"
               }`}
             >
-              <div className="whitespace-pre-wrap">{msg.content.text}</div>
+              {msg.role === "assistant" ? (
+                <div className="whitespace-pre-wrap leading-relaxed">
+                  <ReactMarkdown>{msg.content.text}</ReactMarkdown>
+                </div>
+              ) : (
+                <div className="whitespace-pre-wrap">{msg.content.text}</div>
+              )}
             </div>
 
             {/* Tool use cards */}
@@ -613,7 +620,9 @@ export default function ChatPanel({
         {/* Streaming text */}
         {streaming && streamingText && (
           <div className="mr-8 rounded-lg bg-zinc-900 px-3 py-2 text-sm text-zinc-300">
-            <div className="whitespace-pre-wrap">{streamingText}</div>
+            <div className="whitespace-pre-wrap leading-relaxed">
+              <ReactMarkdown>{streamingText}</ReactMarkdown>
+            </div>
           </div>
         )}
 

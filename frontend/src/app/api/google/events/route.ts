@@ -53,8 +53,10 @@ export async function POST(request: Request) {
     summary?: string;
     description?: string;
     location?: string;
-    start?: { dateTime?: string; date?: string; timeZone?: string };
-    end?: { dateTime?: string; date?: string; timeZone?: string };
+    // From AI tool calls we often receive plain ISO strings for start/end.
+    // Support both the string form and the full Google-style object.
+    start?: { dateTime?: string; date?: string; timeZone?: string } | string;
+    end?: { dateTime?: string; date?: string; timeZone?: string } | string;
     calendarId?: string;
     colorId?: string;
   };
@@ -65,6 +67,15 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+
+  const normalizedStart =
+    typeof payload.start === "string"
+      ? { dateTime: payload.start }
+      : payload.start;
+  const normalizedEnd =
+    typeof payload.end === "string"
+      ? { dateTime: payload.end }
+      : payload.end;
 
   const calendarId = payload.calendarId ?? "primary";
   const apiResponse = await fetch(
@@ -79,8 +90,8 @@ export async function POST(request: Request) {
         summary: payload.summary,
         description: payload.description,
         location: payload.location,
-        start: payload.start,
-        end: payload.end,
+        start: normalizedStart,
+        end: normalizedEnd,
         colorId: payload.colorId,
       }),
     }
@@ -93,6 +104,25 @@ export async function POST(request: Request) {
       calendarId,
       detail,
     });
+    // #region agent log
+    fetch("http://127.0.0.1:7242/ingest/b0367295-de27-4337-8ba8-522b8572237d", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: `log_${Date.now()}_google_create_error`,
+        runId: "pre-fix",
+        hypothesisId: "G1",
+        location: "frontend/src/app/api/google/events/route.ts:POST",
+        message: "Google Calendar create failed",
+        data: {
+          status: apiResponse.status,
+          calendarId,
+          detail,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion agent log
     return NextResponse.json(
       { error: "Calendar create failed", detail },
       { status: apiResponse.status === 429 ? 429 : 500 }
