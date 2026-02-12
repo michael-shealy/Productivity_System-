@@ -29,7 +29,7 @@ The repo and its git history have been scanned for common secret patterns and pr
 
 ## GitHub security settings (recommended)
 
-In the GitHub repository settings for `michael-shealy/Productivity_System`:
+In the GitHub repository settings for `your-username/Productivity_System`:
 
 - Enable **Secret scanning** and **Push protection** (if available) so GitHub can block accidental pushes of secrets.
 - Enable **Dependabot alerts** for vulnerable dependencies.

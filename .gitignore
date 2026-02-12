@@ -9,3 +9,7 @@ nul
 
 export_*/
 wellhub_memberships.csv
+
+# History-rewrite config (local-only, never commit)
+filter-repo-paths.txt
+replacements.txt
