@@ -86,10 +86,6 @@ function buildUserPrompt(ctx: AIBriefingRequest): string {
     );
   }
 
-  if (ctx.focusThemes.length > 0) {
-    sections.push(`Detected focus themes: ${ctx.focusThemes.join(", ")}`);
-  }
-
   if (ctx.focus3.length > 0) {
     sections.push(
       `Focus 3 for today:\n${ctx.focus3.map((f) => `- ${f.label} (${f.type})`).join("\n")}`

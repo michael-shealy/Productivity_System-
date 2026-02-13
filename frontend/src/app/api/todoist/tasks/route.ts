@@ -1,21 +1,12 @@
 import { NextResponse } from "next/server";
 import { normalizeCompletedTodoistTask, normalizeTodoistTask } from "@/lib/contracts";
-import { getRouteUser } from "@/lib/supabase/route";
-import { getOAuthToken } from "@/lib/supabase/tokens";
+import { requireProviderToken, apiErrorResponse } from "@/lib/api-helpers";
 import { TODOIST_API_BASE } from "@/lib/todoist";
 
-async function getTodoistToken() {
-  const { supabase, user } = await getRouteUser();
-  if (!user) return null;
-  const result = await getOAuthToken(supabase, user.id, "todoist");
-  return result?.access_token ?? null;
-}
-
 export async function GET(request: Request) {
-  const token = await getTodoistToken();
-  if (!token) {
-    return NextResponse.json({ error: "Missing Todoist token" }, { status: 401 });
-  }
+  const auth = await requireProviderToken("todoist");
+  if (auth.error) return auth.error;
+  const token = auth.token;
 
   const apiResponse = await fetch(`${TODOIST_API_BASE}/tasks`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -23,14 +14,7 @@ export async function GET(request: Request) {
 
   if (!apiResponse.ok) {
     const detail = await apiResponse.text();
-    console.error("Todoist fetch failed", {
-      status: apiResponse.status,
-      detail,
-    });
-    return NextResponse.json(
-      { error: "Todoist fetch failed", detail },
-      { status: apiResponse.status === 429 ? 429 : 500 }
-    );
+    return apiErrorResponse("Todoist fetch failed", apiResponse.status, detail);
   }
 
   const data = (await apiResponse.json()) as { results: Array<Record<string, unknown>> };
@@ -76,10 +60,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const token = await getTodoistToken();
-  if (!token) {
-    return NextResponse.json({ error: "Missing Todoist token" }, { status: 401 });
-  }
+  const auth = await requireProviderToken("todoist");
+  if (auth.error) return auth.error;
+  const token = auth.token;
 
   const payload = (await request.json()) as {
     content?: string;
@@ -107,14 +90,7 @@ export async function POST(request: Request) {
 
   if (!apiResponse.ok) {
     const detail = await apiResponse.text();
-    console.error("Todoist create failed", {
-      status: apiResponse.status,
-      detail,
-    });
-    return NextResponse.json(
-      { error: "Todoist create failed", detail },
-      { status: apiResponse.status === 429 ? 429 : 500 }
-    );
+    return apiErrorResponse("Todoist create failed", apiResponse.status, detail);
   }
 
   const data = (await apiResponse.json()) as Record<string, unknown>;
@@ -123,10 +99,9 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const token = await getTodoistToken();
-  if (!token) {
-    return NextResponse.json({ error: "Missing Todoist token" }, { status: 401 });
-  }
+  const auth = await requireProviderToken("todoist");
+  if (auth.error) return auth.error;
+  const token = auth.token;
 
   const payload = (await request.json()) as {
     id?: string;
@@ -156,15 +131,7 @@ export async function PATCH(request: Request) {
 
     if (!apiResponse.ok) {
       const detail = await apiResponse.text();
-      console.error("Todoist update failed", {
-        status: apiResponse.status,
-        detail,
-        action: payload.action,
-      });
-      return NextResponse.json(
-        { error: "Todoist update failed", detail },
-        { status: apiResponse.status === 429 ? 429 : 500 }
-      );
+      return apiErrorResponse("Todoist update failed", apiResponse.status, detail);
     }
 
     return NextResponse.json({ ok: true });
@@ -182,14 +149,7 @@ export async function PATCH(request: Request) {
 
   if (!apiResponse.ok) {
     const detail = await apiResponse.text();
-    console.error("Todoist update failed", {
-      status: apiResponse.status,
-      detail,
-    });
-    return NextResponse.json(
-      { error: "Todoist update failed", detail },
-      { status: apiResponse.status === 429 ? 429 : 500 }
-    );
+    return apiErrorResponse("Todoist update failed", apiResponse.status, detail);
   }
 
   const text = await apiResponse.text();
@@ -202,10 +162,9 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const token = await getTodoistToken();
-  if (!token) {
-    return NextResponse.json({ error: "Missing Todoist token" }, { status: 401 });
-  }
+  const auth = await requireProviderToken("todoist");
+  if (auth.error) return auth.error;
+  const token = auth.token;
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
@@ -220,14 +179,7 @@ export async function DELETE(request: Request) {
 
   if (!apiResponse.ok) {
     const detail = await apiResponse.text();
-    console.error("Todoist delete failed", {
-      status: apiResponse.status,
-      detail,
-    });
-    return NextResponse.json(
-      { error: "Todoist delete failed", detail },
-      { status: apiResponse.status === 429 ? 429 : 500 }
-    );
+    return apiErrorResponse("Todoist delete failed", apiResponse.status, detail);
   }
 
   return NextResponse.json({ ok: true });

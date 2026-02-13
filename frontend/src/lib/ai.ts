@@ -24,7 +24,6 @@ export type AIBriefingRequest = {
     last7Sum: number;
   }>;
   identityScore: number;
-  focusThemes: string[];
   focus3: Array<{ label: string; type: string }>;
   morningFlowStatus: string;
   latestReflection?: LatestReflectionForAI;
@@ -79,7 +78,6 @@ export function buildBriefingContext(opts: {
     sumLast7: number;
   }>;
   identityScore: number;
-  focusThemes: string[];
   focus3Snapshot: Array<{ label: string; type: string }>;
   morningFlowStatus: string;
   latestReflection?: LatestReflectionForAI;
@@ -127,7 +125,6 @@ export function buildBriefingContext(opts: {
         last7Sum: s.sumLast7,
       })),
     identityScore: opts.identityScore,
-    focusThemes: opts.focusThemes,
     focus3: opts.focus3Snapshot.map((f) => ({
       label: f.label,
       type: f.type,

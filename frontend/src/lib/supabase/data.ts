@@ -5,7 +5,6 @@ import type { AIBriefingResponse } from "@/lib/ai";
 import type {
   WeeklyReflection,
   UserPreferences,
-  IdentityProfile,
 } from "@/lib/supabase/types";
 
 // ── Identity Metrics ──────────────────────────────────────────────────
@@ -195,61 +194,6 @@ export async function saveFocus3(
       ai_reasoning: aiReasoning ?? "",
     },
     { onConflict: "user_id,date" }
-  );
-}
-
-export async function deleteFocus3(
-  supabase: SupabaseClient,
-  userId: string,
-  date: string
-) {
-  await supabase
-    .from("daily_focus3")
-    .delete()
-    .eq("user_id", userId)
-    .eq("date", date);
-}
-
-// ── Identity Profile ─────────────────────────────────────────────────────
-
-export async function loadIdentityProfile(
-  supabase: SupabaseClient,
-  userId: string
-): Promise<IdentityProfile | null> {
-  const { data } = await supabase
-    .from("identity_profiles")
-    .select(
-      "values_document, busy_day_protocol, recovery_protocol, comparison_protocol, phase_metadata"
-    )
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (!data) return null;
-  return {
-    valuesDocument: (data.values_document as string | null) ?? null,
-    busyDayProtocol: (data.busy_day_protocol as Record<string, unknown> | null) ?? null,
-    recoveryProtocol: (data.recovery_protocol as Record<string, unknown> | null) ?? null,
-    comparisonProtocol:
-      (data.comparison_protocol as Record<string, unknown> | null) ?? null,
-    phaseMetadata: (data.phase_metadata as Record<string, unknown> | null) ?? null,
-  };
-}
-
-export async function saveIdentityProfile(
-  supabase: SupabaseClient,
-  userId: string,
-  profile: IdentityProfile
-): Promise<void> {
-  await supabase.from("identity_profiles").upsert(
-    {
-      user_id: userId,
-      values_document: profile.valuesDocument,
-      busy_day_protocol: profile.busyDayProtocol,
-      recovery_protocol: profile.recoveryProtocol,
-      comparison_protocol: profile.comparisonProtocol,
-      phase_metadata: profile.phaseMetadata,
-    },
-    { onConflict: "user_id" }
   );
 }
 
@@ -685,24 +629,6 @@ export async function upsertFourWeekReview(
     { onConflict: "user_id,period_end_date" }
   );
   if (error) throw error;
-}
-
-// ── OAuth Status ──────────────────────────────────────────────────────
-
-export async function getOAuthStatus(
-  supabase: SupabaseClient,
-  userId: string
-): Promise<{ todoist: boolean; google: boolean }> {
-  const { data } = await supabase
-    .from("user_oauth_tokens")
-    .select("provider")
-    .eq("user_id", userId);
-
-  const providers = new Set((data ?? []).map((row) => row.provider));
-  return {
-    todoist: providers.has("todoist"),
-    google: providers.has("google"),
-  };
 }
 
 // ── Chat Messages ─────────────────────────────────────────────────────

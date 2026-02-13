@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { CalendarEventContract, TaskContract } from "@/lib/contracts";
 import type { Habit, HabitSession } from "@/lib/habits";
 import type { Goal } from "@/lib/goals";
 import { buildBriefingContext } from "@/lib/ai";
 import { useAIBriefing } from "@/lib/useAIBriefing";
+import { toDateKey, getWeekStartKey, getMonthKey, getYearKey } from "@/lib/date-utils";
+import { computeHabitStats } from "@/lib/habit-stats";
+import { apiFetch } from "@/lib/fetch-helpers";
 import { createClient } from "@/lib/supabase/client";
 import {
   loadIdentityMetrics,
@@ -41,6 +44,81 @@ import InsightsSection from "@/components/InsightsSection";
 import IdentityCheck, { identityQuestions } from "@/components/IdentityCheck";
 import CalendarMonthView from "@/components/CalendarMonthView";
 import ConnectionsPanel from "@/components/ConnectionsPanel";
+
+type Focus3Item = { id: string; label: string; type: string };
+
+type Focus3State = {
+  status: "loading" | "proposing" | "submitted" | "editing";
+  items: Focus3Item[];
+  draft: Focus3Item[];
+  reasoning: string;
+  aiLoading: boolean;
+  aiError: string | null;
+  dataLoaded: boolean;
+  customInputs: Record<number, string>;
+};
+
+type Focus3Action =
+  | { type: "LOAD_FROM_DB"; items: Focus3Item[]; reasoning: string }
+  | { type: "DATA_LOADED" }
+  | { type: "AI_START" }
+  | { type: "AI_SUCCESS"; items: Focus3Item[]; reasoning: string }
+  | { type: "AI_ERROR"; error: string }
+  | { type: "AI_DONE" }
+  | { type: "ACCEPT_DRAFT"; items: Focus3Item[] }
+  | { type: "EDIT_START"; items: Focus3Item[] }
+  | { type: "CANCEL_EDIT" }
+  | { type: "SET_DRAFT"; draft: Focus3Item[] }
+  | { type: "SET_CUSTOM_INPUT"; index: number; value: string }
+  | { type: "CLEAR_MANUAL" };
+
+const focus3InitialState: Focus3State = {
+  status: "loading",
+  items: [],
+  draft: [],
+  reasoning: "",
+  aiLoading: false,
+  aiError: null,
+  dataLoaded: false,
+  customInputs: {},
+};
+
+function focus3Reducer(state: Focus3State, action: Focus3Action): Focus3State {
+  switch (action.type) {
+    case "LOAD_FROM_DB":
+      return { ...state, items: action.items, reasoning: action.reasoning, status: "submitted" };
+    case "DATA_LOADED":
+      return { ...state, dataLoaded: true };
+    case "AI_START":
+      return { ...state, aiLoading: true, aiError: null };
+    case "AI_SUCCESS":
+      return { ...state, draft: action.items, reasoning: action.reasoning, status: "proposing" };
+    case "AI_ERROR":
+      return { ...state, aiError: action.error, draft: [...EMPTY_FOCUS3], status: "proposing" };
+    case "AI_DONE":
+      return { ...state, aiLoading: false };
+    case "ACCEPT_DRAFT":
+      return { ...state, items: action.items, status: "submitted", customInputs: {} };
+    case "EDIT_START":
+      return { ...state, draft: [...action.items], status: "editing" };
+    case "CANCEL_EDIT":
+      return { ...state, status: "submitted" };
+    case "SET_DRAFT":
+      return { ...state, draft: action.draft };
+    case "SET_CUSTOM_INPUT":
+      return { ...state, customInputs: { ...state.customInputs, [action.index]: action.value } };
+    case "CLEAR_MANUAL":
+      return { ...state, draft: [...EMPTY_FOCUS3], reasoning: "", customInputs: {} };
+    default:
+      return state;
+  }
+}
+
+const EMPTY_FOCUS3: Array<{ id: string; label: string; type: string }> = [
+  { id: "", label: "", type: "Focus" },
+  { id: "", label: "", type: "Focus" },
+  { id: "", label: "", type: "Focus" },
+];
 
 export default function Home() {
   const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
@@ -151,14 +229,7 @@ export default function Home() {
   const [weeklyReflectionFromDb, setWeeklyReflectionFromDb] = useState(false);
   const [weeklyReflectionEditMode, setWeeklyReflectionEditMode] = useState(false);
   const [fourWeekReviewSaveError, setFourWeekReviewSaveError] = useState<string | null>(null);
-  const [focus3Status, setFocus3Status] = useState<"loading" | "proposing" | "submitted" | "editing">("loading");
-  const [focus3Items, setFocus3Items] = useState<Array<{ id: string; label: string; type: string }>>([]);
-  const [focus3Draft, setFocus3Draft] = useState<Array<{ id: string; label: string; type: string }>>([]);
-  const [focus3Reasoning, setFocus3Reasoning] = useState("");
-  const [focus3AiLoading, setFocus3AiLoading] = useState(false);
-  const [focus3AiError, setFocus3AiError] = useState<string | null>(null);
-  const [focus3DataLoaded, setFocus3DataLoaded] = useState(false);
-  const [focus3CustomInputs, setFocus3CustomInputs] = useState<Record<number, string>>({});
+  const [f3, f3d] = useReducer(focus3Reducer, focus3InitialState);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [taskEditForm, setTaskEditForm] = useState({
     content: "",
@@ -260,11 +331,9 @@ export default function Home() {
         setMorningFlowSteps(flowData.steps);
       }
       if (focus3Data?.items?.length) {
-        setFocus3Items(focus3Data.items);
-        setFocus3Reasoning(focus3Data.aiReasoning ?? "");
-        setFocus3Status("submitted");
+        f3d({ type: "LOAD_FROM_DB", items: focus3Data.items, reasoning: focus3Data.aiReasoning ?? "" });
       }
-      setFocus3DataLoaded(true);
+      f3d({ type: "DATA_LOADED" });
     }
 
     init();
@@ -279,11 +348,12 @@ export default function Home() {
 
   const hasTodoist = todoistTasks.length > 0;
   const hasCalendar = calendarEvents.length > 0;
-  const identityScore = Object.values(identityMetrics).filter(Boolean).length;
+  const countTrue = (obj: Record<string, boolean>) => Object.values(obj).filter(Boolean).length;
+  const identityScore = countTrue(identityMetrics);
   /** Yesterday's identity score (0–5) for AI briefing/insights — excludes today so morning content isn't based on incomplete checks. */
   const identityScoreForAI =
     yesterdayIdentityMetrics != null
-      ? Object.values(yesterdayIdentityMetrics).filter(Boolean).length
+      ? countTrue(yesterdayIdentityMetrics)
       : 0;
   const defaultIdentityMetricsForAI = {
     morningGrounding: false,
@@ -373,19 +443,6 @@ export default function Home() {
     return getFallbackCalendarColor(event.calendarId);
   };
 
-  const getWeekStartKey = (date: Date) => {
-    const start = new Date(date);
-    const day = start.getDay();
-    start.setDate(start.getDate() - day);
-    start.setHours(0, 0, 0, 0);
-    return toDateKey(start);
-  };
-
-  const getMonthKey = (date: Date) =>
-    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-
-  const getYearKey = (date: Date) => `${date.getFullYear()}`;
-
   const toLocalDateTimeInputValue = (value?: string) => {
     if (!value) return "";
     const parsed = new Date(value);
@@ -394,11 +451,6 @@ export default function Home() {
     const local = new Date(parsed.getTime() - offsetMs);
     return local.toISOString().slice(0, 16);
   };
-
-  const toDateKey = (date: Date) =>
-    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-      date.getDate()
-    ).padStart(2, "0")}`;
 
   const eventDateKey = (event: CalendarEventContract) => {
     const raw = event.start?.dateTime ?? event.start?.date;
@@ -583,22 +635,14 @@ export default function Home() {
     setTodoistLoading(true);
     setTodoistError(null);
     try {
-      const response = await fetch("/api/todoist/tasks?includeCompletedToday=true");
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        if (silent && response.status === 401) return;
-        if (response.status === 401) {
-          throw new Error("Todoist not connected. Click Connect Todoist.");
-        }
-        if (response.status === 429) {
-          throw new Error("Todoist rate limit hit. Try again in a minute.");
-        }
-        throw new Error(payload.detail ?? payload.error ?? "Todoist fetch failed");
-      }
-      const payload = (await response.json()) as {
+      const payload = await apiFetch<{
         items: TaskContract[];
         completedToday?: TaskContract[];
-      };
+      }>("/api/todoist/tasks?includeCompletedToday=true", {
+        silent401: silent,
+        label: "Todoist fetch",
+      });
+      if (!payload) return;
       setTodoistTasks(payload.items ?? []);
       const filteredCompleted =
         payload.completedToday?.filter((task) => {
@@ -622,21 +666,13 @@ export default function Home() {
 
   const loadTodoistProjects = useCallback(async (silent = false) => {
     try {
-      const response = await fetch("/api/todoist/projects");
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        if (silent && response.status === 401) return;
-        if (response.status === 401) {
-          throw new Error("Todoist not connected. Click Connect Todoist.");
-        }
-        if (response.status === 429) {
-          throw new Error("Todoist rate limit hit. Try again in a minute.");
-        }
-        throw new Error(payload.detail ?? payload.error ?? "Todoist projects fetch failed");
-      }
-      const payload = (await response.json()) as {
+      const payload = await apiFetch<{
         items: Array<{ id: string; name: string }>;
-      };
+      }>("/api/todoist/projects", {
+        silent401: silent,
+        label: "Todoist projects fetch",
+      });
+      if (!payload) return;
       setTodoistProjects(payload.items ?? []);
     } catch (error) {
       if (!silent) {
@@ -651,21 +687,13 @@ export default function Home() {
 
   const loadGoogleCalendars = useCallback(async (silent = false) => {
     try {
-      const response = await fetch("/api/google/calendars");
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        if (silent && response.status === 401) return;
-        if (response.status === 401) {
-          throw new Error("Google Calendar not connected. Click Connect Google.");
-        }
-        if (response.status === 429) {
-          throw new Error("Google Calendar rate limit hit. Try again shortly.");
-        }
-        throw new Error(payload.detail ?? payload.error ?? "Calendar list failed");
-      }
-      const payload = (await response.json()) as {
+      const payload = await apiFetch<{
         items: Array<{ id: string; name: string; primary: boolean }>;
-      };
+      }>("/api/google/calendars", {
+        silent401: silent,
+        label: "Calendar list",
+      });
+      if (!payload) return;
       const calendars = payload.items ?? [];
       setGoogleCalendars(calendars);
       if (!selectedCalendarIds.length && calendars.length) {
@@ -690,21 +718,13 @@ export default function Home() {
         const calendarParam = selectedCalendarIds.length
           ? `?calendarIds=${encodeURIComponent(selectedCalendarIds.join(","))}`
           : "";
-        const response = await fetch(`/api/google/events${calendarParam}`);
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({}));
-          if (silent && response.status === 401) return;
-        if (response.status === 401) {
-          throw new Error("Google Calendar not connected. Click Connect Google.");
-        }
-        if (response.status === 429) {
-          throw new Error("Google Calendar rate limit hit. Try again shortly.");
-        }
-        throw new Error(payload.detail ?? payload.error ?? "Calendar fetch failed");
-        }
-        const payload = (await response.json()) as {
+        const payload = await apiFetch<{
           items: CalendarEventContract[];
-        };
+        }>(`/api/google/events${calendarParam}`, {
+          silent401: silent,
+          label: "Calendar fetch",
+        });
+        if (!payload) return;
         setCalendarEvents(payload.items ?? []);
       } catch (error) {
         if (!silent) {
@@ -1243,325 +1263,10 @@ export default function Home() {
     return days;
   }, []);
 
-  const habitStats = useMemo(() => {
-    return activeHabits.map((habit) => {
-      const sessions = habitSessionsById.get(habit.id) ?? [];
-      const totalsByDay = new Map<string, number>();
-      const totalsByWeek = new Map<string, number>();
-      const totalsByMonth = new Map<string, number>();
-      const totalsByYear = new Map<string, number>();
-      const weekdayTotals = Array.from({ length: 7 }, () => 0);
-      const weekdaySuccess = Array.from({ length: 7 }, () => 0);
-      const monthTotals = new Map<string, number>();
-      const monthSuccess = new Map<string, number>();
-      let earliestSession: Date | null = null;
-
-      sessions.forEach((session) => {
-        const raw = session.createdAt;
-        if (!raw) return;
-        const parsed = new Date(raw);
-        if (Number.isNaN(parsed.getTime())) return;
-        if (!earliestSession || parsed < earliestSession) {
-          earliestSession = parsed;
-        }
-        const dayKey = toDateKey(parsed);
-        const weekKey = getWeekStartKey(parsed);
-        const monthKey = getMonthKey(parsed);
-        const yearKey = getYearKey(parsed);
-        const amount = habit.kind === "amount" ? session.amount ?? 0 : 1;
-        totalsByDay.set(dayKey, (totalsByDay.get(dayKey) ?? 0) + amount);
-        totalsByWeek.set(weekKey, (totalsByWeek.get(weekKey) ?? 0) + amount);
-        totalsByMonth.set(monthKey, (totalsByMonth.get(monthKey) ?? 0) + amount);
-        totalsByYear.set(yearKey, (totalsByYear.get(yearKey) ?? 0) + amount);
-        weekdayTotals[parsed.getDay()] += amount;
-        monthTotals.set(monthKey, (monthTotals.get(monthKey) ?? 0) + amount);
-      });
-
-      const isDaily = habit.period.toLowerCase().includes("day");
-      const target = habit.count || 1;
-      const successDayKeys = new Set<string>();
-      const successWeekKeys = new Set<string>();
-
-      totalsByDay.forEach((value, key) => {
-        if (isDaily) {
-          if (habit.kind === "amount" ? value >= target : value >= 1) {
-            successDayKeys.add(key);
-            const parsed = new Date(`${key}T00:00:00`);
-            if (!Number.isNaN(parsed.getTime())) {
-              weekdaySuccess[parsed.getDay()] += 1;
-            }
-          }
-        } else if (value > 0) {
-          successDayKeys.add(key);
-        }
-      });
-
-      totalsByWeek.forEach((value, key) => {
-        if (!isDaily) {
-          if (habit.kind === "amount" ? value >= target : value >= target) {
-            successWeekKeys.add(key);
-          }
-        }
-      });
-
-      const startDate =
-        habit.createdAt && !Number.isNaN(new Date(habit.createdAt).getTime())
-          ? new Date(habit.createdAt)
-          : earliestSession ?? new Date();
-      startDate.setHours(0, 0, 0, 0);
-      const todayDate = new Date();
-      todayDate.setHours(0, 0, 0, 0);
-      const yesterdayDate = new Date(todayDate);
-      yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-      const yesterdayKey = toDateKey(yesterdayDate);
-      const todayKey = toDateKey(todayDate);
-
-      // If anything has been logged for this habit today, we treat "today" as part of the streak/data window.
-      // Otherwise, we evaluate all streak/adherence metrics as of yesterday, so an unlogged morning
-      // doesn't appear as a broken streak.
-      const hasAnyLogToday = (totalsByDay.get(todayKey) ?? 0) > 0;
-      const metricsEndDate = hasAnyLogToday ? todayDate : yesterdayDate;
-      const metricsEndKey = hasAnyLogToday ? todayKey : yesterdayKey;
-
-      const countDaysBetween = (start: Date, end: Date) => {
-        const diff = end.getTime() - start.getTime();
-        return Math.max(1, Math.floor(diff / 86400000) + 1);
-      };
-
-      const countWeeksBetween = (start: Date, end: Date) => {
-        const startWeek = new Date(start);
-        startWeek.setDate(startWeek.getDate() - startWeek.getDay());
-        const endWeek = new Date(end);
-        endWeek.setDate(endWeek.getDate() - endWeek.getDay());
-        const diff = endWeek.getTime() - startWeek.getTime();
-        return Math.max(1, Math.floor(diff / (7 * 86400000)) + 1);
-      };
-
-      const countMonthsBetween = (start: Date, end: Date) => {
-        return (
-          (end.getFullYear() - start.getFullYear()) * 12 +
-          (end.getMonth() - start.getMonth()) +
-          1
-        );
-      };
-
-      const countYearsBetween = (start: Date, end: Date) => {
-        return end.getFullYear() - start.getFullYear() + 1;
-      };
-
-      const successMonths = new Set<string>();
-      const successYears = new Set<string>();
-      (isDaily ? successDayKeys : successWeekKeys).forEach((key) => {
-        const parsed = new Date(`${key}T00:00:00`);
-        if (Number.isNaN(parsed.getTime())) return;
-        successMonths.add(getMonthKey(parsed));
-        successYears.add(getYearKey(parsed));
-        const monthKey = getMonthKey(parsed);
-        monthSuccess.set(monthKey, (monthSuccess.get(monthKey) ?? 0) + 1);
-      });
-
-      const successDaysCount = successDayKeys.size;
-      const successWeeksCount = successWeekKeys.size;
-      const successMonthsCount = successMonths.size;
-      const successYearsCount = successYears.size;
-
-      // Historic metrics are evaluated up through the metricsEndDate:
-      // - If nothing has been logged today, this is yesterday.
-      // - If something has been logged today, this is today.
-      const successDaysThroughEnd = Array.from(successDayKeys).filter(
-        (key) => key <= metricsEndKey
-      ).length;
-      const successWeeksExcludingCurrent = Array.from(successWeekKeys).filter(
-        (key) => {
-          const weekStart = new Date(`${key}T00:00:00`);
-          if (Number.isNaN(weekStart.getTime())) return false;
-          const weekEnd = new Date(weekStart);
-          weekEnd.setDate(weekEnd.getDate() + 6);
-          return weekEnd <= yesterdayDate;
-        }
-      ).length;
-
-      const totalPeriods = isDaily
-        ? countDaysBetween(startDate, metricsEndDate)
-        : countWeeksBetween(startDate, yesterdayDate);
-      const successPeriods = isDaily
-        ? successDaysThroughEnd
-        : successWeeksExcludingCurrent;
-      const adherencePercent =
-        totalPeriods > 0 ? Math.round((successPeriods / totalPeriods) * 100) : 0;
-
-      const last365Start = new Date(metricsEndDate);
-      last365Start.setDate(last365Start.getDate() - 364);
-      const currentYearStart = new Date(metricsEndDate.getFullYear(), 0, 1);
-
-      const countSuccessInRange = (
-        keys: Set<string>,
-        rangeStart: Date,
-        rangeEnd: Date
-      ) => {
-        let count = 0;
-        keys.forEach((key) => {
-          const parsed = new Date(`${key}T00:00:00`);
-          if (Number.isNaN(parsed.getTime())) return;
-          if (parsed >= rangeStart && parsed <= rangeEnd) {
-            count += 1;
-          }
-        });
-        return count;
-      };
-
-      const totalLast365 = isDaily
-        ? countDaysBetween(
-            startDate > last365Start ? startDate : last365Start,
-            metricsEndDate
-          )
-        : countWeeksBetween(
-            startDate > last365Start ? startDate : last365Start,
-            yesterdayDate
-          );
-      const totalCurrentYear = isDaily
-        ? countDaysBetween(
-            startDate > currentYearStart ? startDate : currentYearStart,
-            metricsEndDate
-          )
-        : countWeeksBetween(
-            startDate > currentYearStart ? startDate : currentYearStart,
-            yesterdayDate
-          );
-
-      const successLast365 = isDaily
-        ? countSuccessInRange(successDayKeys, last365Start, metricsEndDate)
-        : (() => {
-            let n = 0;
-            successWeekKeys.forEach((key) => {
-              const weekStart = new Date(`${key}T00:00:00`);
-              if (Number.isNaN(weekStart.getTime())) return;
-              const weekEnd = new Date(weekStart);
-              weekEnd.setDate(weekEnd.getDate() + 6);
-              if (weekEnd >= last365Start && weekEnd <= yesterdayDate) n += 1;
-            });
-            return n;
-          })();
-      const successCurrentYear = isDaily
-        ? countSuccessInRange(successDayKeys, currentYearStart, metricsEndDate)
-        : (() => {
-            let n = 0;
-            successWeekKeys.forEach((key) => {
-              const weekStart = new Date(`${key}T00:00:00`);
-              if (Number.isNaN(weekStart.getTime())) return;
-              const weekEnd = new Date(weekStart);
-              weekEnd.setDate(weekEnd.getDate() + 6);
-              if (weekEnd >= currentYearStart && weekEnd <= yesterdayDate) n += 1;
-            });
-            return n;
-          })();
-
-      const adherenceLast365 =
-        totalLast365 > 0 ? Math.round((successLast365 / totalLast365) * 100) : 0;
-      const adherenceCurrentYear =
-        totalCurrentYear > 0 ? Math.round((successCurrentYear / totalCurrentYear) * 100) : 0;
-
-      const currentWeekKey = getWeekStartKey(todayDate);
-      const currentWeekSuccess = isDaily
-        ? Array.from(successDayKeys).some((key) => {
-            const parsed = new Date(`${key}T00:00:00`);
-            if (Number.isNaN(parsed.getTime())) return false;
-            return getWeekStartKey(parsed) === currentWeekKey;
-          })
-        : successWeekKeys.has(currentWeekKey);
-
-      const getActiveStreak = () => {
-        if (isDaily) {
-          let streak = 0;
-          const cursor = new Date(metricsEndDate);
-          while (true) {
-            const key = toDateKey(cursor);
-            if (!successDayKeys.has(key)) break;
-            streak += 1;
-            cursor.setDate(cursor.getDate() - 1);
-          }
-          return streak;
-        }
-        let streak = 0;
-        const cursor = new Date(todayDate);
-        cursor.setDate(cursor.getDate() - cursor.getDay());
-        while (true) {
-          const key = toDateKey(cursor);
-          if (!successWeekKeys.has(key)) break;
-          streak += 1;
-          cursor.setDate(cursor.getDate() - 7);
-        }
-        return streak;
-      };
-
-      const getLongestStreak = () => {
-        if (isDaily) {
-          let longest = 0;
-          let current = 0;
-          const cursor = new Date(startDate);
-          while (cursor <= metricsEndDate) {
-            const key = toDateKey(cursor);
-            if (successDayKeys.has(key)) {
-              current += 1;
-              longest = Math.max(longest, current);
-            } else {
-              current = 0;
-            }
-            cursor.setDate(cursor.getDate() + 1);
-          }
-          return longest;
-        }
-        let longest = 0;
-        let current = 0;
-        const cursor = new Date(startDate);
-        cursor.setDate(cursor.getDate() - cursor.getDay());
-        while (cursor <= todayDate) {
-          const key = toDateKey(cursor);
-          if (successWeekKeys.has(key)) {
-            current += 1;
-            longest = Math.max(longest, current);
-          } else {
-            current = 0;
-          }
-          cursor.setDate(cursor.getDate() + 7);
-        }
-        return longest;
-      };
-
-      const last7 = last7Days.map((key) => totalsByDay.get(key) ?? 0);
-      const sumLast7 = last7.reduce((acc, value) => acc + value, 0);
-
-      return {
-        habit,
-        last7,
-        sumLast7,
-        activeStreak: getActiveStreak(),
-        longestStreak: getLongestStreak(),
-        adherencePercent,
-        adherenceLast365,
-        adherenceCurrentYear,
-        currentWeekSuccess,
-        weekdayTotals,
-        weekdaySuccess,
-        monthTotals,
-        monthSuccess,
-        successDaysCount,
-        successWeeksCount,
-        successMonthsCount,
-        successYearsCount,
-        totalsByDay,
-        totalsByWeek,
-        totalsByMonth,
-        totalsByYear,
-        isDaily,
-        startDate,
-        totalDays: countDaysBetween(startDate, metricsEndDate),
-        totalWeeks: countWeeksBetween(startDate, metricsEndDate),
-        totalMonths: countMonthsBetween(startDate, metricsEndDate),
-        totalYears: countYearsBetween(startDate, metricsEndDate),
-      };
-    });
-  }, [activeHabits, habitSessionsById, last7Days]);
+  const habitStats = useMemo(
+    () => computeHabitStats(activeHabits, habitSessionsById, last7Days),
+    [activeHabits, habitSessionsById, last7Days]
+  );
 
   // Habit summary for the previous week (the week being reflected on) — must be after habitStats
   const previousWeekHabitSummary = useMemo(() => {
@@ -1701,12 +1406,11 @@ export default function Home() {
   useEffect(() => {
     const ctx = focus3ContextRef.current;
     const hasData = ctx.dueTodayTasks.length > 0 || ctx.todayAgendaEvents.length > 0 || ctx.habitStats.length > 0;
-    if (focus3Status !== "loading" || !focus3DataLoaded || focus3AiLoading) return;
+    if (f3.status !== "loading" || !f3.dataLoaded || f3.aiLoading) return;
     if (!hasData) return;
 
     const abortController = new AbortController();
-    setFocus3AiLoading(true);
-    setFocus3AiError(null);
+    f3d({ type: "AI_START" });
 
     const weekday = new Date().toLocaleDateString("en-US", { weekday: "long" });
     const formatEventTime = (event: CalendarEventContract) => {
@@ -1754,29 +1458,20 @@ export default function Home() {
       })
       .then((data: { items: Array<{ id: string; label: string; type: string }>; reasoning: string }) => {
         if (abortController.signal.aborted) return;
-        setFocus3Draft(data.items.length ? data.items : []);
-        setFocus3Reasoning(data.reasoning ?? "");
-        setFocus3Status("proposing");
+        f3d({ type: "AI_SUCCESS", items: data.items.length ? data.items : [], reasoning: data.reasoning ?? "" });
       })
       .catch((err) => {
         if (abortController.signal.aborted) return;
-        setFocus3AiError(err instanceof Error ? err.message : "Failed to generate Focus 3");
-        // Fall back to manual mode — set proposing with empty draft
-        setFocus3Draft([
-          { id: "", label: "", type: "Focus" },
-          { id: "", label: "", type: "Focus" },
-          { id: "", label: "", type: "Focus" },
-        ]);
-        setFocus3Status("proposing");
+        f3d({ type: "AI_ERROR", error: err instanceof Error ? err.message : "Failed to generate Focus 3" });
       })
       .finally(() => {
-        if (!abortController.signal.aborted) setFocus3AiLoading(false);
+        if (!abortController.signal.aborted) f3d({ type: "AI_DONE" });
       });
 
     return () => abortController.abort();
     // Only re-run when ready state or data-availability changes; use focus3ContextRef for payload to avoid
     // re-running (and aborting the request) when tasks/events/habits update.
-  }, [focus3Status, focus3DataLoaded, focus3HasData]);
+  }, [f3.status, f3.dataLoaded, focus3HasData]);
 
   const aiBriefingContext = useMemo(() => {
     if (!habitStats.length && !dueTodayTasks.length && !todayAgendaEvents.length) {
@@ -1789,8 +1484,7 @@ export default function Home() {
       todayAgendaEvents,
       habitStats,
       identityScore: identityScoreForAI,
-      focusThemes: [],
-      focus3Snapshot: focus3Status === "submitted" ? focus3Items : [],
+      focus3Snapshot: f3.status === "submitted" ? f3.items : [],
       morningFlowStatus,
       latestReflection: latestWeeklyReflection ?? undefined,
       aiTone: userPreferences?.aiTone ?? "standard",
@@ -1802,8 +1496,8 @@ export default function Home() {
     completedTodayTasks,
     todayAgendaEvents,
     identityScoreForAI,
-    focus3Status,
-    focus3Items,
+    f3.status,
+    f3.items,
     morningFlowStatus,
     latestWeeklyReflection,
     userPreferences?.aiTone,
@@ -1830,9 +1524,9 @@ export default function Home() {
 
   const saveFocus3Submit = () => {
     // Resolve custom inputs: if a draft item has id="" (custom), assign a manual id
-    const resolvedItems = focus3Draft.map((item, index) => {
+    const resolvedItems = f3.draft.map((item, index) => {
       if (item.id === "custom" || item.id === "") {
-        const customLabel = focus3CustomInputs[index]?.trim() || item.label.trim() || "Focus anchor";
+        const customLabel = f3.customInputs[index]?.trim() || item.label.trim() || "Focus anchor";
         return { id: `custom-${index + 1}-${todayKey}`, label: customLabel, type: "Custom" };
       }
       return item;
@@ -1840,17 +1534,14 @@ export default function Home() {
     while (resolvedItems.length < 3) {
       resolvedItems.push({ id: `custom-${resolvedItems.length + 1}-${todayKey}`, label: "Focus anchor", type: "Identity" });
     }
-    setFocus3Items(resolvedItems);
-    setFocus3Status("submitted");
-    setFocus3CustomInputs({});
+    f3d({ type: "ACCEPT_DRAFT", items: resolvedItems });
     if (user && supabase) {
-      saveFocus3(supabase, user.id, todayKey, resolvedItems, focus3Reasoning).catch(() => {});
+      saveFocus3(supabase, user.id, todayKey, resolvedItems, f3.reasoning).catch(() => {});
     }
   };
 
   const editFocus3 = () => {
-    setFocus3Draft([...focus3Items]);
-    setFocus3Status("editing");
+    f3d({ type: "EDIT_START", items: f3.items });
   };
 
   const scrollToSection = (id: string) => {
@@ -2287,15 +1978,15 @@ export default function Home() {
                   <div>
                     <h2 className="text-lg font-semibold">Focus 3</h2>
                     <p className="text-sm text-zinc-300">
-                      {focus3AiLoading
+                      {f3.aiLoading
                         ? "AI is selecting your Focus 3..."
-                        : focus3Status === "proposing"
+                        : f3.status === "proposing"
                           ? "AI suggested your Focus 3. Review and submit."
                           : "Choose what matters most today, not what is loudest."}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    {focus3Status === "submitted" && (
+                    {f3.status === "submitted" && (
                       <button
                         type="button"
                         onClick={editFocus3}
@@ -2308,7 +1999,7 @@ export default function Home() {
                 </div>
 
                 {/* Loading / AI generating state */}
-                {(focus3Status === "loading" || focus3AiLoading) && (
+                {(f3.status === "loading" || f3.aiLoading) && (
                   <div className="mt-4 space-y-2">
                     {[0, 1, 2].map((i) => (
                       <div key={`skeleton-${i}`} className="h-10 animate-pulse rounded-lg bg-emerald-500/10 border border-emerald-900/30" />
@@ -2317,18 +2008,18 @@ export default function Home() {
                 )}
 
                 {/* AI error message */}
-                {focus3AiError && (
-                  <p className="mt-2 text-xs text-amber-400">{focus3AiError} — pick your Focus 3 manually below.</p>
+                {f3.aiError && (
+                  <p className="mt-2 text-xs text-amber-400">{f3.aiError} — pick your Focus 3 manually below.</p>
                 )}
 
                 {/* Proposing / Editing state — dropdown UI */}
-                {(focus3Status === "proposing" || focus3Status === "editing") && !focus3AiLoading && (
+                {(f3.status === "proposing" || f3.status === "editing") && !f3.aiLoading && (
                   <div className="mt-3 space-y-2 text-sm text-zinc-200">
-                    {focus3Reasoning && focus3Status === "proposing" && (
-                      <p className="text-xs text-emerald-300/80 italic mb-2">{focus3Reasoning}</p>
+                    {f3.reasoning && f3.status === "proposing" && (
+                      <p className="text-xs text-emerald-300/80 italic mb-2">{f3.reasoning}</p>
                     )}
                     {[0, 1, 2].map((index) => {
-                      const currentVal = focus3Draft[index]?.id ?? "";
+                      const currentVal = f3.draft[index]?.id ?? "";
                       const isCustom = currentVal === "custom";
                       return (
                         <div
@@ -2341,19 +2032,15 @@ export default function Home() {
                             onChange={(e) => {
                               const selectedId = e.target.value;
                               if (selectedId === "custom") {
-                                setFocus3Draft((prev) => {
-                                  const next = [...prev];
-                                  next[index] = { id: "custom", label: "", type: "Custom" };
-                                  return next;
-                                });
+                                const next = [...f3.draft];
+                                next[index] = { id: "custom", label: "", type: "Custom" };
+                                f3d({ type: "SET_DRAFT", draft: next });
                               } else {
                                 const opt = focus3Options.find((o) => o.id === selectedId);
                                 if (opt) {
-                                  setFocus3Draft((prev) => {
-                                    const next = [...prev];
-                                    next[index] = { id: opt.id, label: opt.label, type: opt.type };
-                                    return next;
-                                  });
+                                  const next = [...f3.draft];
+                                  next[index] = { id: opt.id, label: opt.label, type: opt.type };
+                                  f3d({ type: "SET_DRAFT", draft: next });
                                 }
                               }
                             }}
@@ -2379,9 +2066,9 @@ export default function Home() {
                             <input
                               className="mt-2 w-full rounded-lg border border-emerald-900/50 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-100"
                               placeholder="Type your focus item..."
-                              value={focus3CustomInputs[index] ?? ""}
+                              value={f3.customInputs[index] ?? ""}
                               onChange={(e) =>
-                                setFocus3CustomInputs((prev) => ({ ...prev, [index]: e.target.value }))
+                                f3d({ type: "SET_CUSTOM_INPUT", index, value: e.target.value })
                               }
                             />
                           )}
@@ -2394,29 +2081,21 @@ export default function Home() {
                         onClick={saveFocus3Submit}
                         className="rounded-full bg-emerald-500 px-4 py-2 text-xs font-medium text-white hover:bg-emerald-400"
                       >
-                        {focus3Status === "editing" ? "Save changes" : "Submit Focus 3"}
+                        {f3.status === "editing" ? "Save changes" : "Submit Focus 3"}
                       </button>
-                      {focus3Status === "editing" && (
+                      {f3.status === "editing" && (
                         <button
                           type="button"
-                          onClick={() => setFocus3Status("submitted")}
+                          onClick={() => f3d({ type: "CANCEL_EDIT" })}
                           className="rounded-full border border-zinc-800 px-4 py-2 text-xs text-zinc-300 hover:text-white"
                         >
                           Cancel
                         </button>
                       )}
-                      {focus3Status === "proposing" && (
+                      {f3.status === "proposing" && (
                         <button
                           type="button"
-                          onClick={() => {
-                            setFocus3Draft([
-                              { id: "", label: "", type: "Focus" },
-                              { id: "", label: "", type: "Focus" },
-                              { id: "", label: "", type: "Focus" },
-                            ]);
-                            setFocus3Reasoning("");
-                            setFocus3CustomInputs({});
-                          }}
+                          onClick={() => f3d({ type: "CLEAR_MANUAL" })}
                           className="text-xs text-zinc-400 hover:text-zinc-200 underline"
                         >
                           Start from scratch
@@ -2427,10 +2106,10 @@ export default function Home() {
                 )}
 
                 {/* Submitted state — locked items */}
-                {focus3Status === "submitted" && (
+                {f3.status === "submitted" && (
                   <>
                     <ul className="mt-3 space-y-2 text-sm text-zinc-200">
-                      {focus3Items.map((item) => (
+                      {f3.items.map((item) => (
                         <li
                           key={item.id}
                           className="rounded-lg border border-emerald-900/50 bg-emerald-500/10 px-3 py-2"
@@ -2444,8 +2123,8 @@ export default function Home() {
                         </li>
                       ))}
                     </ul>
-                    {focus3Reasoning && (
-                      <p className="mt-2 text-xs text-zinc-400 italic">{focus3Reasoning}</p>
+                    {f3.reasoning && (
+                      <p className="mt-2 text-xs text-zinc-400 italic">{f3.reasoning}</p>
                     )}
                   </>
                 )}
@@ -4332,7 +4011,7 @@ export default function Home() {
           habitSessions={habitSessions}
           identityMetrics={identityMetrics}
           yesterdayIdentityMetrics={yesterdayIdentityMetrics}
-          focus3={focus3Items}
+          focus3={f3.items}
           morningFlowStatus={morningFlowStatus}
           latestReflection={latestWeeklyReflection}
           aiTone={userPreferences?.aiTone}

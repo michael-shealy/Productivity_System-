@@ -1,21 +1,12 @@
 import { NextResponse } from "next/server";
 import { normalizeGoogleEvent } from "@/lib/contracts";
-import { getRouteUser } from "@/lib/supabase/route";
-import { getOAuthToken } from "@/lib/supabase/tokens";
+import { requireProviderToken, apiErrorResponse } from "@/lib/api-helpers";
 import { fetchGoogleCalendarEvents } from "@/lib/google-calendar";
 
-async function getGoogleToken() {
-  const { supabase, user } = await getRouteUser();
-  if (!user) return null;
-  const result = await getOAuthToken(supabase, user.id, "google");
-  return result?.access_token ?? null;
-}
-
 export async function GET(request: Request) {
-  const token = await getGoogleToken();
-  if (!token) {
-    return NextResponse.json({ error: "Missing Google token" }, { status: 401 });
-  }
+  const auth = await requireProviderToken("google");
+  if (auth.error) return auth.error;
+  const token = auth.token;
 
   const { searchParams } = new URL(request.url);
 
@@ -44,10 +35,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const token = await getGoogleToken();
-  if (!token) {
-    return NextResponse.json({ error: "Missing Google token" }, { status: 401 });
-  }
+  const auth = await requireProviderToken("google");
+  if (auth.error) return auth.error;
+  const token = auth.token;
 
   const payload = (await request.json()) as {
     summary?: string;
@@ -99,15 +89,7 @@ export async function POST(request: Request) {
 
   if (!apiResponse.ok) {
     const detail = await apiResponse.text();
-    console.error("Calendar create failed", {
-      status: apiResponse.status,
-      calendarId,
-      detail,
-    });
-    return NextResponse.json(
-      { error: "Calendar create failed", detail },
-      { status: apiResponse.status === 429 ? 429 : 500 }
-    );
+    return apiErrorResponse("Calendar create failed", apiResponse.status, detail);
   }
 
   const data = (await apiResponse.json()) as Record<string, unknown>;
@@ -116,10 +98,9 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const token = await getGoogleToken();
-  if (!token) {
-    return NextResponse.json({ error: "Missing Google token" }, { status: 401 });
-  }
+  const auth = await requireProviderToken("google");
+  if (auth.error) return auth.error;
+  const token = auth.token;
 
   const payload = (await request.json()) as {
     id?: string;
@@ -160,15 +141,7 @@ export async function PATCH(request: Request) {
 
   if (!apiResponse.ok) {
     const detail = await apiResponse.text();
-    console.error("Calendar update failed", {
-      status: apiResponse.status,
-      calendarId,
-      detail,
-    });
-    return NextResponse.json(
-      { error: "Calendar update failed", detail },
-      { status: apiResponse.status === 429 ? 429 : 500 }
-    );
+    return apiErrorResponse("Calendar update failed", apiResponse.status, detail);
   }
 
   const data = (await apiResponse.json()) as Record<string, unknown>;
@@ -177,10 +150,9 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const token = await getGoogleToken();
-  if (!token) {
-    return NextResponse.json({ error: "Missing Google token" }, { status: 401 });
-  }
+  const auth = await requireProviderToken("google");
+  if (auth.error) return auth.error;
+  const token = auth.token;
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
@@ -201,15 +173,7 @@ export async function DELETE(request: Request) {
 
   if (!apiResponse.ok) {
     const detail = await apiResponse.text();
-    console.error("Calendar delete failed", {
-      status: apiResponse.status,
-      calendarId,
-      detail,
-    });
-    return NextResponse.json(
-      { error: "Calendar delete failed", detail },
-      { status: apiResponse.status === 429 ? 429 : 500 }
-    );
+    return apiErrorResponse("Calendar delete failed", apiResponse.status, detail);
   }
 
   return NextResponse.json({ ok: true });
