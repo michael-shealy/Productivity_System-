@@ -730,7 +730,6 @@ export default function Home() {
       ]);
       setHabits(habitsData);
       setHabitSessions(sessionsData);
-      setHabitSource("supabase");
     } catch (error) {
       setHabitError(error instanceof Error ? error.message : "Habit load failed");
     } finally {

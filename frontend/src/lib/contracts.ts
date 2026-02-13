@@ -50,7 +50,7 @@ type TodoistTaskApi = {
   labels?: string[];
   priority?: number;
   url?: string;
-  created_at?: string;
+  added_at?: string;
   due?: {
     date?: string;
     datetime?: string;
@@ -102,7 +102,7 @@ export function normalizeTodoistTask(task: TodoistTaskApi): TaskContract {
     source: "todoist",
     status: "active",
     priority: task.priority ?? 1,
-    createdAt: task.created_at,
+    createdAt: task.added_at,
     due: task.due
       ? {
           date: task.due.date,

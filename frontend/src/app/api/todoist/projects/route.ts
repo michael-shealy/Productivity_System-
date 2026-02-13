@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRouteUser } from "@/lib/supabase/route";
 import { getOAuthToken } from "@/lib/supabase/tokens";
+import { TODOIST_API_BASE } from "@/lib/todoist";
 
 export async function GET() {
   const { supabase, user } = await getRouteUser();
@@ -14,7 +15,7 @@ export async function GET() {
     return NextResponse.json({ error: "Missing Todoist token" }, { status: 401 });
   }
 
-  const apiResponse = await fetch("https://api.todoist.com/rest/v2/projects", {
+  const apiResponse = await fetch(`${TODOIST_API_BASE}/projects`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 
@@ -30,10 +31,9 @@ export async function GET() {
     );
   }
 
-  const data = (await apiResponse.json()) as Array<{
-    id: string;
-    name: string;
-  }>;
+  const data = (await apiResponse.json()) as {
+    results: Array<{ id: string; name: string }>;
+  };
 
-  return NextResponse.json({ items: data });
+  return NextResponse.json({ items: data.results });
 }

@@ -27,6 +27,49 @@ The repo and its git history have been scanned for common secret patterns and pr
   1. Rotate the secret immediately in the provider dashboard.
   2. (Optional) scrub it from git history using `git filter-repo` or equivalent, then force-push.
 
+## Pre-commit secret scanner
+
+A git pre-commit hook automatically scans staged files for secrets and PII before every commit. It is installed via [husky](https://typicode.github.io/husky/) and runs a custom Node.js scanner (`frontend/scripts/check-secrets.js`).
+
+### What it checks
+
+| Category | Examples |
+|----------|----------|
+| API keys | Anthropic (`sk-ant-api*`), Google (`AIza*`), generic (`sk-*`) |
+| Tokens | GitHub (`ghp_*`, `gho_*`, `ghs_*`), Slack (`xox*`), AWS (`AKIA*`) |
+| JWTs | Supabase service keys, any `eyJ...` three-part token |
+| Private keys | `-----BEGIN ... PRIVATE KEY-----` blocks |
+| Connection strings | `postgres://user:pass@host`, `mongodb://...`, etc. |
+| Env files | Any `.env` file (except `.env.example`) is blocked entirely |
+| Hardcoded secrets | `SECRET = 'value'`, `TOKEN = "value"`, etc. |
+| IP endpoints | Hardcoded `IP:port` patterns (debug telemetry) |
+
+### Setup
+
+Hooks are installed automatically when you run `npm install` (via the `prepare` script). To install manually:
+
+```bash
+cd frontend && npm run prepare
+```
+
+### Bypassing the hook (emergency only)
+
+If you need to commit despite a finding (e.g., a false positive you intend to allowlist):
+
+```bash
+git commit --no-verify
+```
+
+Use this sparingly. Prefer adding the pattern to the allowlist in `check-secrets.js` instead.
+
+### Adding new patterns
+
+Edit `frontend/scripts/check-secrets.js`:
+
+- Add entries to `SECRET_PATTERNS` for new regex-based detections
+- Add entries to `SKIP_PATHS` for files that should never be scanned
+- Add logic to `shouldSkipLine()` for line-level false positive suppression
+
 ## GitHub security settings (recommended)
 
 In the GitHub repository settings for `your-username/Productivity_System`:

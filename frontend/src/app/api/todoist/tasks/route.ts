@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { normalizeCompletedTodoistTask, normalizeTodoistTask } from "@/lib/contracts";
 import { getRouteUser } from "@/lib/supabase/route";
 import { getOAuthToken } from "@/lib/supabase/tokens";
+import { TODOIST_API_BASE } from "@/lib/todoist";
 
 async function getTodoistToken() {
   const { supabase, user } = await getRouteUser();
@@ -16,7 +17,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Missing Todoist token" }, { status: 401 });
   }
 
-  const apiResponse = await fetch("https://api.todoist.com/rest/v2/tasks", {
+  const apiResponse = await fetch(`${TODOIST_API_BASE}/tasks`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 
@@ -32,8 +33,8 @@ export async function GET(request: Request) {
     );
   }
 
-  const data = (await apiResponse.json()) as Array<Record<string, unknown>>;
-  const items = data.map((task) => normalizeTodoistTask(task as any));
+  const data = (await apiResponse.json()) as { results: Array<Record<string, unknown>> };
+  const items = data.results.map((task) => normalizeTodoistTask(task as any));
 
   const { searchParams } = new URL(request.url);
   const includeCompletedToday = searchParams.get("includeCompletedToday") === "true";
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
 
   try {
     const completedResponse = await fetch(
-      `https://api.todoist.com/sync/v9/completed/get?since=${encodeURIComponent(
+      `${TODOIST_API_BASE}/tasks/completed/by_completion_date?since=${encodeURIComponent(
         since
       )}`,
       { headers: { Authorization: `Bearer ${token}` } }
@@ -95,7 +96,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing content" }, { status: 400 });
   }
 
-  const apiResponse = await fetch("https://api.todoist.com/rest/v2/tasks", {
+  const apiResponse = await fetch(`${TODOIST_API_BASE}/tasks`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -146,7 +147,7 @@ export async function PATCH(request: Request) {
 
   if (payload.action === "close" || payload.action === "reopen") {
     const apiResponse = await fetch(
-      `https://api.todoist.com/rest/v2/tasks/${payload.id}/${payload.action}`,
+      `${TODOIST_API_BASE}/tasks/${payload.id}/${payload.action}`,
       {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -170,7 +171,7 @@ export async function PATCH(request: Request) {
   }
 
   const { id, action, ...updatePayload } = payload;
-  const apiResponse = await fetch(`https://api.todoist.com/rest/v2/tasks/${id}`, {
+  const apiResponse = await fetch(`${TODOIST_API_BASE}/tasks/${id}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -212,7 +213,7 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Missing task id" }, { status: 400 });
   }
 
-  const apiResponse = await fetch(`https://api.todoist.com/rest/v2/tasks/${id}`, {
+  const apiResponse = await fetch(`${TODOIST_API_BASE}/tasks/${id}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
