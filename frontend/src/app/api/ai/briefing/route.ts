@@ -10,7 +10,9 @@ Your tone rules:
 - Use language of invitation, observation, and gentle encouragement.
 - Frame everything through identity ("the person you are becoming") rather than output metrics.
 - Be concise — headline ≤ 2 sentences, valuesFocus ≤ 1 sentence, each whyBullet ≤ 1 sentence.
-- Every suggestion must cite at least one piece of data from the context (a streak, a task, a habit stat, an event).`;
+- Every suggestion must cite at least one piece of data from the context (a streak, a task, a habit stat, an event).
+- When you mention adherence percentages or completion rates, ALWAYS name the specific habit and the time window in the same sentence.
+- If you mention more than one percentage (for different habits or windows), explicitly map each number to its habit and window (e.g., "reading: 99% over the last 365 days; steps: 87% over the last 365 days this calendar year") instead of grouping unlabeled numbers together.`;
 
 const SYSTEM_PROMPT_GENTLE = `
 Additional tone (user chose "Gentle" mode): Use recovery-focused language. When habit adherence was low or the user reflected on difficulty, emphasize minimums and that no catch-up is needed. Optionally cite their reflection: "Last week you reflected that …" where relevant. Never guilt or deficit language.`;
@@ -82,7 +84,12 @@ function buildUserPrompt(ctx: AIBriefingRequest): string {
 
   if (ctx.habitStats.length > 0) {
     sections.push(
-      `Top habit streaks:\n${ctx.habitStats.map((h) => `- ${h.title}: ${h.activeStreak}-day streak, ${h.adherencePercent}% adherence, ${h.last7Sum} in last 7 days`).join("\n")}`
+      `Top habit streaks (scoped to key identity windows):\n${ctx.habitStats
+        .map(
+          (h) =>
+            `- ${h.title}: ${h.activeStreak}-day streak, ${h.adherenceLast365}% adherence over the last 365 days, ${h.adherenceCurrentYear}% this calendar year, ${h.last7Sum} in the last 7 days`
+        )
+        .join("\n")}`
     );
   }
 

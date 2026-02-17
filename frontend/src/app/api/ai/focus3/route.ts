@@ -73,7 +73,12 @@ function buildUserPrompt(ctx: Focus3AIRequest): string {
 
   if (ctx.habits.length > 0) {
     sections.push(
-      `Habits:\n${ctx.habits.map((h) => `- id="${h.id}" | ${h.title} | streak=${h.activeStreak} days | adherence=${h.adherencePercent}% | last7=${h.last7Sum} | period=${h.period}`).join("\n")}`
+      `Habits:\n${ctx.habits
+        .map(
+          (h) =>
+            `- id="${h.id}" | ${h.title} | streak=${h.activeStreak} days | adherence=${h.adherenceLast365}% over the last 365 days, ${h.adherenceCurrentYear}% this calendar year | last7=${h.last7Sum} | period=${h.period}`
+        )
+        .join("\n")}`
     );
   }
 

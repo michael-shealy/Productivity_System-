@@ -20,8 +20,9 @@ export type AIBriefingRequest = {
   habitStats: Array<{
     title: string;
     activeStreak: number;
-    adherencePercent: number;
     last7Sum: number;
+    adherenceLast365: number;
+    adherenceCurrentYear: number;
   }>;
   identityScore: number;
   focus3: Array<{ label: string; type: string }>;
@@ -52,7 +53,15 @@ export type Focus3AIRequest = {
   goals: Array<{ title: string; domain: string; description: string; season: string }>;
   tasks: Array<{ id: string; title: string; priority: number; status: string }>;
   events: Array<{ id: string; title: string; time: string }>;
-  habits: Array<{ id: string; title: string; activeStreak: number; adherencePercent: number; last7Sum: number; period: string }>;
+  habits: Array<{
+    id: string;
+    title: string;
+    activeStreak: number;
+    last7Sum: number;
+    adherenceLast365: number;
+    adherenceCurrentYear: number;
+    period: string;
+  }>;
   identityMetrics: { morningGrounding: boolean; embodiedMovement: boolean; nutritionalAwareness: boolean; presentConnection: boolean; curiositySpark: boolean };
   identityScore: number;
   latestReflection?: LatestReflectionForAI;
@@ -74,8 +83,9 @@ export function buildBriefingContext(opts: {
   habitStats: Array<{
     habit: { title: string };
     activeStreak: number;
-    adherencePercent: number;
     sumLast7: number;
+    adherenceLast365: number;
+    adherenceCurrentYear: number;
   }>;
   identityScore: number;
   focus3Snapshot: Array<{ label: string; type: string }>;
@@ -121,8 +131,9 @@ export function buildBriefingContext(opts: {
       .map((s) => ({
         title: s.habit.title,
         activeStreak: s.activeStreak,
-        adherencePercent: s.adherencePercent,
         last7Sum: s.sumLast7,
+        adherenceLast365: s.adherenceLast365,
+        adherenceCurrentYear: s.adherenceCurrentYear,
       })),
     identityScore: opts.identityScore,
     focus3: opts.focus3Snapshot.map((f) => ({
