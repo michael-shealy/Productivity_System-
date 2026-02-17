@@ -10,11 +10,15 @@ type Insight = {
 type InsightsSectionProps = {
   aiBriefingInsights: Insight[] | undefined;
   practiceInsights: Insight[];
+  onRefreshInsights?: () => void;
+  insightsLoading?: boolean;
 };
 
 export default function InsightsSection({
   aiBriefingInsights,
   practiceInsights,
+  onRefreshInsights,
+  insightsLoading,
 }: InsightsSectionProps) {
   const displayInsights = aiBriefingInsights ?? practiceInsights;
 
@@ -27,9 +31,26 @@ export default function InsightsSection({
             Calm, explainable nudges tied to your identity practices.
           </p>
         </div>
-        <span className="rounded-full border border-indigo-900/50 bg-indigo-500/10 px-3 py-1 text-xs text-indigo-200">
-          {aiBriefingInsights ? "AI-assisted" : "Explainable only"}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full border border-indigo-900/50 bg-indigo-500/10 px-3 py-1 text-xs text-indigo-200">
+            {aiBriefingInsights ? "AI-assisted" : "Explainable only"}
+          </span>
+          {onRefreshInsights && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onRefreshInsights();
+              }}
+              disabled={insightsLoading}
+              aria-label="Refresh insights"
+              className="rounded-full border border-indigo-900/60 px-3 py-1 text-xs text-indigo-100 hover:text-white disabled:opacity-60"
+            >
+              {insightsLoading ? "Refreshing..." : "Refresh insights"}
+            </button>
+          )}
+        </div>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         {displayInsights.length === 0 ? (

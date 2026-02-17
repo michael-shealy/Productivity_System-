@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import type { CalendarEventContract, TaskContract } from "@/lib/contracts";
 import type { Habit, HabitSession } from "@/lib/habits";
 import type { Goal } from "@/lib/goals";
-import { buildBriefingContext } from "@/lib/ai";
+import { buildBriefingContext, type AIBriefingResponse } from "@/lib/ai";
 import { useAIBriefing } from "@/lib/useAIBriefing";
 import { toDateKey, getWeekStartKey, getMonthKey, getYearKey } from "@/lib/date-utils";
 import { computeHabitStats } from "@/lib/habit-stats";
@@ -833,6 +833,10 @@ export default function Home() {
   }, [todayKey]);
 
   const weeklyReflectionFilledForPreviousWeek = useMemo(() => {
+    // Only treat the previous week as "filled" once a reflection has been
+    // loaded from or successfully saved to the database. This prevents the
+    // card from disappearing on non-Sundays while the user is still typing.
+    if (!weeklyReflectionFromDb) return false;
     if (!weeklyReflection || weeklyReflection.weekStartDate !== previousWeekKey) return false;
     return (
       weeklyReflection.whatWentWell.trim() !== "" ||
@@ -840,7 +844,7 @@ export default function Home() {
       weeklyReflection.learnings.trim() !== "" ||
       weeklyReflection.capabilityGrowth !== null
     );
-  }, [weeklyReflection, previousWeekKey]);
+  }, [weeklyReflectionFromDb, weeklyReflection, previousWeekKey]);
 
   const showWeeklyReflectionSection =
     isSunday || (!weeklyReflectionFilledForPreviousWeek && weeklyReflection?.weekStartDate === previousWeekKey);
@@ -1504,6 +1508,55 @@ export default function Home() {
   ]);
 
   const aiBriefing = useAIBriefing(aiBriefingContext, supabase, user?.id ?? null);
+  const [morningBriefing, setMorningBriefing] = useState<AIBriefingResponse | null>(null);
+  const [insightsBriefing, setInsightsBriefing] = useState<AIBriefingResponse["insights"] | null>(null);
+  const [pendingMorningBriefingRefresh, setPendingMorningBriefingRefresh] = useState(false);
+  const [pendingInsightsRefresh, setPendingInsightsRefresh] = useState(false);
+
+  useEffect(() => {
+    if (!aiBriefing.briefing) return;
+
+    // Initial load: capture briefing for both sections once
+    if (
+      !morningBriefing &&
+      !insightsBriefing &&
+      !pendingInsightsRefresh &&
+      !pendingMorningBriefingRefresh
+    ) {
+      setMorningBriefing(aiBriefing.briefing);
+      setInsightsBriefing(aiBriefing.briefing.insights);
+      return;
+    }
+
+    // Explicit Morning Briefing refresh: update only the morning snapshot
+    if (pendingMorningBriefingRefresh) {
+      setMorningBriefing(aiBriefing.briefing);
+      setPendingMorningBriefingRefresh(false);
+      return;
+    }
+
+    // Insights-only refresh: update only the insights snapshot
+    if (pendingInsightsRefresh) {
+      setInsightsBriefing(aiBriefing.briefing.insights);
+      setPendingInsightsRefresh(false);
+    }
+  }, [
+    aiBriefing.briefing,
+    morningBriefing,
+    insightsBriefing,
+    pendingInsightsRefresh,
+    pendingMorningBriefingRefresh,
+  ]);
+
+  const handleMorningBriefingRefresh = () => {
+    setPendingMorningBriefingRefresh(true);
+    aiBriefing.refresh();
+  };
+
+  const handleInsightsRefresh = () => {
+    setPendingInsightsRefresh(true);
+    aiBriefing.refresh();
+  };
 
   const morningFlowStepCount = Object.values(morningFlowSteps).filter(Boolean).length;
   const morningFlowTotalSteps = Object.keys(morningFlowSteps).length;
@@ -1920,19 +1973,19 @@ export default function Home() {
                         Gentle
                       </button>
                     </div>
-                    {aiBriefing.briefing && (
+                    {morningBriefing && (
                       <button
                         type="button"
-                        onClick={aiBriefing.refresh}
-                        disabled={aiBriefing.loading}
+                        onClick={handleMorningBriefingRefresh}
+                        disabled={pendingMorningBriefingRefresh}
                         className="rounded-full border border-indigo-700/60 px-3 py-1 text-xs text-indigo-200 hover:text-white disabled:opacity-50"
                       >
-                        {aiBriefing.loading ? "Generating..." : "Refresh"}
+                        {pendingMorningBriefingRefresh ? "Refreshing..." : "Refresh"}
                       </button>
                     )}
                   </div>
                 </div>
-                {aiBriefing.loading && !aiBriefing.briefing ? (
+                {aiBriefing.loading && !morningBriefing ? (
                   <div className="mt-3 space-y-3 animate-pulse">
                     <div className="h-4 w-3/4 rounded bg-indigo-500/20" />
                     <div className="h-4 w-1/2 rounded bg-indigo-500/20" />
@@ -1942,17 +1995,17 @@ export default function Home() {
                 ) : (
                   <>
                     <p className="mt-2 text-sm text-zinc-300">
-                      {aiBriefing.briefing?.headline ?? briefingCopy}
+                      {morningBriefing?.headline ?? briefingCopy}
                     </p>
                     <div className="mt-4 rounded-xl bg-indigo-500/10 px-4 py-3 text-sm text-indigo-200">
-                      {aiBriefing.briefing?.valuesFocus ??
+                      {morningBriefing?.valuesFocus ??
                         "Values focus: presence, grounded confidence, relationship care."}
                     </div>
                     <div className="mt-3 rounded-xl border border-indigo-900/50 bg-zinc-950/40 px-4 py-3 text-xs text-zinc-300">
                       <p className="font-semibold text-indigo-200">Why this briefing</p>
                       <ul className="mt-2 space-y-1">
                         {(
-                          aiBriefing.briefing?.whyBullets ?? [
+                          morningBriefing?.whyBullets ?? [
                             `${dueTodayTasks.length} tasks are due today tied to your operational commitments.`,
                             `${todayAgendaEvents.length} events shape the day\u2019s constraints and themes.`,
                             "Primary focus areas are prioritized over productivity volume.",
@@ -2132,8 +2185,10 @@ export default function Home() {
             </section>
 
           <InsightsSection
-            aiBriefingInsights={aiBriefing.briefing?.insights}
+            aiBriefingInsights={insightsBriefing ?? aiBriefing.briefing?.insights}
             practiceInsights={practiceInsights}
+            onRefreshInsights={handleInsightsRefresh}
+            insightsLoading={pendingInsightsRefresh}
           />
 
             <IdentityCheck
