@@ -115,8 +115,17 @@ export type WeeklyReflection = {
   capabilityGrowth: boolean | null;
 };
 
+export type IdentityQuestionConfig = {
+  key: string;
+  label: string;
+  helper: string;
+};
+
 export type UserPreferences = {
   aiTone?: "standard" | "gentle";
+  onboardingCompleted?: boolean;
+  identityQuestions?: IdentityQuestionConfig[];
+  aiAdditionalContext?: string;
 };
 
 export type DbUserPreferences = {

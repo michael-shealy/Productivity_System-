@@ -1,5 +1,7 @@
 "use client";
 
+import type { IdentityQuestionConfig } from "@/lib/supabase/types";
+
 type IdentityMetrics = {
   morningGrounding: boolean;
   embodiedMovement: boolean;
@@ -17,6 +19,7 @@ type IdentityCheckProps = {
   identityViewLoading: boolean;
   todayKey: string;
   toggleIdentityMetric: (key: string) => void;
+  customQuestions?: IdentityQuestionConfig[];
 };
 
 const identityQuestions: Array<{
@@ -63,7 +66,16 @@ export default function IdentityCheck({
   identityViewLoading,
   todayKey,
   toggleIdentityMetric,
+  customQuestions,
 }: IdentityCheckProps) {
+  // Merge custom labels over defaults (keep the same keys for DB mapping)
+  const displayQuestions = customQuestions
+    ? identityQuestions.map((def) => {
+        const custom = customQuestions.find((c) => c.key === def.key);
+        return custom ? { ...def, label: custom.label, helper: custom.helper } : def;
+      })
+    : identityQuestions;
+
   return (
     <section id="identity-check" className="rounded-2xl border border-indigo-900/40 bg-zinc-900/80 p-4 shadow-sm backdrop-blur sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -140,7 +152,7 @@ export default function IdentityCheck({
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        {identityQuestions.map((question) => {
+        {displayQuestions.map((question) => {
           const isActive = identityViewActive[question.key];
           return (
             <button

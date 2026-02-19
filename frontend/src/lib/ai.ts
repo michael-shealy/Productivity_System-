@@ -11,6 +11,14 @@ export type LatestReflectionForAI = {
   capabilityGrowth: boolean | null;
 };
 
+export type IdentityProfileForAI = {
+  valuesDocument?: string;
+  busyDayProtocol?: string;
+  recoveryProtocol?: string;
+  currentPhase?: string;
+  coreValues?: string[];
+};
+
 export type AIBriefingRequest = {
   today: string;
   goals: Array<{ id: string; title: string; domain: string; season: string }>;
@@ -29,6 +37,9 @@ export type AIBriefingRequest = {
   morningFlowStatus: string;
   latestReflection?: LatestReflectionForAI;
   aiTone?: "standard" | "gentle";
+  identityProfile?: IdentityProfileForAI;
+  customIdentityLabels?: string[];
+  aiAdditionalContext?: string;
 };
 
 export type AIInsightCard = {
@@ -66,6 +77,8 @@ export type Focus3AIRequest = {
   identityScore: number;
   latestReflection?: LatestReflectionForAI;
   aiTone?: "standard" | "gentle";
+  identityProfile?: IdentityProfileForAI;
+  aiAdditionalContext?: string;
 };
 
 export type Focus3AIResponse = {
@@ -92,6 +105,9 @@ export function buildBriefingContext(opts: {
   morningFlowStatus: string;
   latestReflection?: LatestReflectionForAI;
   aiTone?: "standard" | "gentle";
+  identityProfile?: IdentityProfileForAI;
+  customIdentityLabels?: string[];
+  aiAdditionalContext?: string;
 }): AIBriefingRequest {
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
@@ -143,6 +159,9 @@ export function buildBriefingContext(opts: {
     morningFlowStatus: opts.morningFlowStatus,
     latestReflection: opts.latestReflection,
     aiTone: opts.aiTone,
+    identityProfile: opts.identityProfile,
+    customIdentityLabels: opts.customIdentityLabels,
+    aiAdditionalContext: opts.aiAdditionalContext,
   };
 }
 

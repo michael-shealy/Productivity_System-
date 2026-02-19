@@ -34,8 +34,9 @@ import {
   loadFourWeekReview,
   loadPreviousFourWeekReview,
   upsertFourWeekReview,
+  loadIdentityProfile,
 } from "@/lib/supabase/data";
-import type { WeeklyReflection, UserPreferences } from "@/lib/supabase/types";
+import type { WeeklyReflection, UserPreferences, IdentityProfile } from "@/lib/supabase/types";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import ChatPanel from "@/components/ChatPanel";
 import DashboardHeader from "@/components/DashboardHeader";
@@ -218,6 +219,7 @@ export default function Home() {
   const [weeklyReflectionSaving, setWeeklyReflectionSaving] = useState(false);
   const [latestWeeklyReflection, setLatestWeeklyReflection] = useState<WeeklyReflection | null>(null);
   const [userPreferences, setUserPreferences] = useState<UserPreferences | null>(null);
+  const [identityProfile, setIdentityProfile] = useState<IdentityProfile | null>(null);
   const [fourWeekReflections, setFourWeekReflections] = useState<WeeklyReflection[]>([]);
   const [fourWeekReviewGoalIds, setFourWeekReviewGoalIds] = useState<string[]>([]);
   const [fourWeekReviewNotes, setFourWeekReviewNotes] = useState<string>("");
@@ -278,7 +280,7 @@ export default function Home() {
     curiositySpark: boolean;
   }>>({});
 
-  // Auth check + initial data load from Supabase
+  // Auth check + onboarding gate + initial data load from Supabase
   useEffect(() => {
     let cancelled = false;
     const sb = createClient();
@@ -293,6 +295,22 @@ export default function Home() {
         return;
       }
       setUser(authUser);
+
+      // Onboarding gate: check if user has completed onboarding
+      const [prefs, goalsCheck] = await Promise.all([
+        loadUserPreferences(sb, authUser.id),
+        loadGoals(sb, authUser.id),
+      ]);
+      if (cancelled) return;
+
+      if (prefs?.onboardingCompleted !== true && goalsCheck.length === 0) {
+        // New user without onboarding — redirect to wizard
+        window.location.href = "/onboarding";
+        return;
+      }
+
+      // Store preferences for dashboard use
+      setUserPreferences(prefs);
       setAuthLoading(false);
 
       // Load all daily data in parallel (today + yesterday for identity metrics used by AI)
@@ -300,26 +318,27 @@ export default function Home() {
       const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
       const [
-        goalsData,
         habitsData,
         sessionsData,
         metricsData,
         latestIdentityBeforeToday,
         flowData,
         focus3Data,
+        profileData,
       ] = await Promise.all([
-        loadGoals(sb, authUser.id),
         loadHabits(sb, authUser.id),
         loadHabitSessions(sb, authUser.id),
         loadIdentityMetrics(sb, authUser.id, dateKey),
         loadLatestIdentityMetricsBeforeDate(sb, authUser.id, dateKey),
         loadMorningFlow(sb, authUser.id, dateKey),
         loadFocus3(sb, authUser.id, dateKey),
+        loadIdentityProfile(sb, authUser.id),
       ]);
 
       if (cancelled) return;
 
-      setUserGoals(goalsData);
+      setUserGoals(goalsCheck);
+      if (profileData) setIdentityProfile(profileData);
       if (habitsData.length) setHabits(habitsData);
       if (sessionsData.length) setHabitSessions(sessionsData);
       if (metricsData) setIdentityMetrics(metricsData);
@@ -898,11 +917,7 @@ export default function Home() {
     loadLatestWeeklyReflection(supabase, user.id).then(setLatestWeeklyReflection);
   }, [supabase, user]);
 
-  // Load user preferences (AI tone)
-  useEffect(() => {
-    if (!supabase || !user) return;
-    loadUserPreferences(supabase, user.id).then((prefs) => setUserPreferences(prefs ?? null));
-  }, [supabase, user]);
+  // User preferences loaded in init effect (onboarding gate)
 
   // Load 4-week review data when it's the 4th Sunday
   useEffect(() => {
@@ -1390,6 +1405,8 @@ export default function Home() {
     identityScoreForAI: 0,
     latestReflection: null as WeeklyReflection | null,
     aiTone: "standard" as "standard" | "gentle",
+    identityProfile: null as IdentityProfile | null,
+    aiAdditionalContext: undefined as string | undefined,
   });
   focus3ContextRef.current = {
     todayKey,
@@ -1402,6 +1419,8 @@ export default function Home() {
     identityScoreForAI,
     latestReflection: latestWeeklyReflection,
     aiTone: userPreferences?.aiTone ?? "standard",
+    identityProfile,
+    aiAdditionalContext: userPreferences?.aiAdditionalContext,
   };
   const focus3HasData =
     dueTodayTasks.length > 0 || todayAgendaEvents.length > 0 || activeHabits.length > 0 || habitStats.length > 0;
@@ -1446,6 +1465,12 @@ export default function Home() {
       identityScore: ctx.identityScoreForAI,
       latestReflection: ctx.latestReflection ?? undefined,
       aiTone: ctx.aiTone,
+      identityProfile: ctx.identityProfile ? {
+        valuesDocument: ctx.identityProfile.valuesDocument ?? undefined,
+        currentPhase: (ctx.identityProfile.phaseMetadata as { currentPhase?: string } | null)?.currentPhase ?? undefined,
+        coreValues: (ctx.identityProfile.phaseMetadata as { coreValues?: string[] } | null)?.coreValues ?? undefined,
+      } : undefined,
+      aiAdditionalContext: ctx.aiAdditionalContext,
     };
 
     fetch("/api/ai/focus3", {
@@ -1482,6 +1507,14 @@ export default function Home() {
     if (!habitStats.length && !dueTodayTasks.length && !todayAgendaEvents.length) {
       return null;
     }
+    const ipForAI = identityProfile ? {
+      valuesDocument: identityProfile.valuesDocument ?? undefined,
+      busyDayProtocol: typeof identityProfile.busyDayProtocol === "object" && identityProfile.busyDayProtocol !== null ? (identityProfile.busyDayProtocol as { text?: string }).text : undefined,
+      recoveryProtocol: typeof identityProfile.recoveryProtocol === "object" && identityProfile.recoveryProtocol !== null ? (identityProfile.recoveryProtocol as { text?: string }).text : undefined,
+      currentPhase: (identityProfile.phaseMetadata as { currentPhase?: string } | null)?.currentPhase ?? undefined,
+      coreValues: (identityProfile.phaseMetadata as { coreValues?: string[] } | null)?.coreValues ?? undefined,
+    } : undefined;
+
     return buildBriefingContext({
       goals: userGoals,
       dueTodayTasks,
@@ -1493,6 +1526,9 @@ export default function Home() {
       morningFlowStatus,
       latestReflection: latestWeeklyReflection ?? undefined,
       aiTone: userPreferences?.aiTone ?? "standard",
+      identityProfile: ipForAI,
+      customIdentityLabels: userPreferences?.identityQuestions?.map((q) => q.label),
+      aiAdditionalContext: userPreferences?.aiAdditionalContext,
     });
   }, [
     userGoals,
@@ -1506,6 +1542,9 @@ export default function Home() {
     morningFlowStatus,
     latestWeeklyReflection,
     userPreferences?.aiTone,
+    identityProfile,
+    userPreferences?.identityQuestions,
+    userPreferences?.aiAdditionalContext,
   ]);
 
   const aiBriefing = useAIBriefing(aiBriefingContext, supabase, user?.id ?? null);
@@ -2201,6 +2240,7 @@ export default function Home() {
               identityViewLoading={identityViewLoading}
               todayKey={todayKey}
               toggleIdentityMetric={toggleIdentityMetric}
+              customQuestions={userPreferences?.identityQuestions}
             />
 
             <section
@@ -4071,6 +4111,12 @@ export default function Home() {
           morningFlowStatus={morningFlowStatus}
           latestReflection={latestWeeklyReflection}
           aiTone={userPreferences?.aiTone}
+          identityProfile={identityProfile ? {
+            valuesDocument: identityProfile.valuesDocument ?? undefined,
+            currentPhase: (identityProfile.phaseMetadata as { currentPhase?: string } | null)?.currentPhase ?? undefined,
+            coreValues: (identityProfile.phaseMetadata as { coreValues?: string[] } | null)?.coreValues ?? undefined,
+          } : undefined}
+          aiAdditionalContext={userPreferences?.aiAdditionalContext}
           onTasksChanged={() => loadTodoist(true)}
           onEventsChanged={() => loadCalendar(true)}
           onHabitSessionAdded={(session) => setHabitSessions((prev) => [session, ...prev])}

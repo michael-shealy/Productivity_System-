@@ -204,6 +204,12 @@ export type ChatContext = {
   focus3: Array<{ id: string; label: string; type: string }>;
   morningFlowStatus: string;
   latestReflection?: WeeklyReflection | null;
+  identityProfile?: {
+    valuesDocument?: string;
+    currentPhase?: string;
+    coreValues?: string[];
+  } | null;
+  aiAdditionalContext?: string;
 };
 
 export function buildChatContextMessage(ctx: ChatContext): string {
@@ -282,6 +288,21 @@ export function buildChatContextMessage(ctx: ChatContext): string {
     sections.push(
       `Latest weekly reflection (week of ${r.weekStartDate}):\nWhat went well: ${r.whatWentWell || "(empty)"}\nWhat mattered: ${r.whatMattered || "(empty)"}\nLearnings: ${r.learnings || "(empty)"}`
     );
+  }
+
+  if (ctx.identityProfile) {
+    const ip = ctx.identityProfile;
+    const parts: string[] = [];
+    if (ip.valuesDocument) parts.push(`Identity statement: ${ip.valuesDocument}`);
+    if (ip.coreValues?.length) parts.push(`Core values: ${ip.coreValues.join(", ")}`);
+    if (ip.currentPhase) parts.push(`Current life phase: ${ip.currentPhase}`);
+    if (parts.length > 0) {
+      sections.push(`User identity profile:\n${parts.join("\n")}`);
+    }
+  }
+
+  if (ctx.aiAdditionalContext) {
+    sections.push(`Additional user context: ${ctx.aiAdditionalContext}`);
   }
 
   return sections.join("\n\n");

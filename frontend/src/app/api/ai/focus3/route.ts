@@ -101,6 +101,21 @@ function buildUserPrompt(ctx: Focus3AIRequest): string {
     );
   }
 
+  if (ctx.identityProfile) {
+    const ip = ctx.identityProfile;
+    const parts: string[] = [];
+    if (ip.valuesDocument) parts.push(`Identity statement: ${ip.valuesDocument}`);
+    if (ip.coreValues?.length) parts.push(`Core values: ${ip.coreValues.join(", ")}`);
+    if (ip.currentPhase) parts.push(`Current life phase: ${ip.currentPhase}`);
+    if (parts.length > 0) {
+      sections.push(`User identity profile:\n${parts.join("\n")}`);
+    }
+  }
+
+  if (ctx.aiAdditionalContext) {
+    sections.push(`Additional user context: ${ctx.aiAdditionalContext}`);
+  }
+
   return sections.join("\n\n");
 }
 

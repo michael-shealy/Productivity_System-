@@ -5,6 +5,7 @@ import type { AIBriefingResponse } from "@/lib/ai";
 import type {
   WeeklyReflection,
   UserPreferences,
+  IdentityProfile,
 } from "@/lib/supabase/types";
 
 // ── Identity Metrics ──────────────────────────────────────────────────
@@ -537,13 +538,22 @@ export async function loadUserPreferences(
     .from("user_preferences")
     .select("preferences")
     .eq("user_id", userId)
-    .single();
+    .maybeSingle();
 
   if (!data?.preferences || typeof data.preferences !== "object") return null;
   const prefs = data.preferences as Record<string, unknown>;
   const result: UserPreferences = {};
   if (prefs.ai_tone === "standard" || prefs.ai_tone === "gentle") {
     result.aiTone = prefs.ai_tone;
+  }
+  if (prefs.onboarding_completed === true) {
+    result.onboardingCompleted = true;
+  }
+  if (Array.isArray(prefs.identity_questions)) {
+    result.identityQuestions = prefs.identity_questions as UserPreferences["identityQuestions"];
+  }
+  if (typeof prefs.ai_additional_context === "string") {
+    result.aiAdditionalContext = prefs.ai_additional_context;
   }
   return result;
 }
@@ -553,12 +563,22 @@ export async function saveUserPreferences(
   userId: string,
   preferences: UserPreferences
 ): Promise<void> {
+  const prefsPayload: Record<string, unknown> = {
+    ai_tone: preferences.aiTone ?? "standard",
+  };
+  if (preferences.onboardingCompleted !== undefined) {
+    prefsPayload.onboarding_completed = preferences.onboardingCompleted;
+  }
+  if (preferences.identityQuestions !== undefined) {
+    prefsPayload.identity_questions = preferences.identityQuestions;
+  }
+  if (preferences.aiAdditionalContext !== undefined) {
+    prefsPayload.ai_additional_context = preferences.aiAdditionalContext;
+  }
   await supabase.from("user_preferences").upsert(
     {
       user_id: userId,
-      preferences: {
-        ai_tone: preferences.aiTone ?? "standard",
-      },
+      preferences: prefsPayload,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id" }
@@ -717,4 +737,210 @@ export async function deleteChatMessagesForDate(
     .delete()
     .eq("user_id", userId)
     .eq("date", date);
+}
+
+// ── Identity Profile ─────────────────────────────────────────────────
+
+export async function loadIdentityProfile(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<IdentityProfile | null> {
+  const { data } = await supabase
+    .from("identity_profiles")
+    .select("values_document, busy_day_protocol, recovery_protocol, comparison_protocol, phase_metadata")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (!data) return null;
+  return {
+    valuesDocument: data.values_document,
+    busyDayProtocol: data.busy_day_protocol as Record<string, unknown> | null,
+    recoveryProtocol: data.recovery_protocol as Record<string, unknown> | null,
+    comparisonProtocol: data.comparison_protocol as Record<string, unknown> | null,
+    phaseMetadata: data.phase_metadata as Record<string, unknown> | null,
+  };
+}
+
+export async function saveIdentityProfile(
+  supabase: SupabaseClient,
+  userId: string,
+  profile: IdentityProfile
+): Promise<void> {
+  await supabase.from("identity_profiles").upsert(
+    {
+      user_id: userId,
+      values_document: profile.valuesDocument,
+      busy_day_protocol: profile.busyDayProtocol,
+      recovery_protocol: profile.recoveryProtocol,
+      comparison_protocol: profile.comparisonProtocol,
+      phase_metadata: profile.phaseMetadata,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id" }
+  );
+}
+
+// ── Goal CRUD ────────────────────────────────────────────────────────
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40);
+}
+
+export type CreateGoalPayload = {
+  title: string;
+  domain: string;
+  description: string;
+  season: string;
+};
+
+export async function createGoal(
+  supabase: SupabaseClient,
+  userId: string,
+  payload: CreateGoalPayload,
+  sortOrder?: number
+): Promise<Goal | null> {
+  const slug = slugify(payload.title) + "-" + Math.random().toString(36).slice(2, 8);
+  const { data, error } = await supabase
+    .from("goals")
+    .insert({
+      user_id: userId,
+      slug,
+      title: payload.title,
+      domain: payload.domain,
+      description: payload.description,
+      season: payload.season,
+      active: true,
+      sort_order: sortOrder ?? 0,
+    })
+    .select("id, title, domain, description, season, active")
+    .single();
+
+  if (error || !data) return null;
+  return {
+    id: data.id,
+    title: data.title,
+    domain: data.domain,
+    description: data.description,
+    season: data.season,
+    active: data.active,
+  };
+}
+
+export async function updateGoal(
+  supabase: SupabaseClient,
+  userId: string,
+  goalId: string,
+  updates: Partial<CreateGoalPayload>
+): Promise<boolean> {
+  const body: Record<string, unknown> = {};
+  if (updates.title !== undefined) body.title = updates.title;
+  if (updates.domain !== undefined) body.domain = updates.domain;
+  if (updates.description !== undefined) body.description = updates.description;
+  if (updates.season !== undefined) body.season = updates.season;
+  if (Object.keys(body).length === 0) return true;
+
+  body.updated_at = new Date().toISOString();
+  const { error } = await supabase
+    .from("goals")
+    .update(body)
+    .eq("id", goalId)
+    .eq("user_id", userId);
+  return !error;
+}
+
+export async function deleteGoal(
+  supabase: SupabaseClient,
+  userId: string,
+  goalId: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from("goals")
+    .delete()
+    .eq("id", goalId)
+    .eq("user_id", userId);
+  return !error;
+}
+
+// ── Habit CRUD ───────────────────────────────────────────────────────
+
+export type CreateHabitPayload = {
+  title: string;
+  type: string;
+  kind: "check" | "amount";
+  count: number;
+  period: string;
+  targetDuration?: number;
+};
+
+export async function createHabit(
+  supabase: SupabaseClient,
+  userId: string,
+  payload: CreateHabitPayload
+): Promise<Habit | null> {
+  const { data, error } = await supabase
+    .from("habits")
+    .insert({
+      user_id: userId,
+      title: payload.title,
+      type: payload.type,
+      kind: payload.kind,
+      count: payload.count,
+      period: payload.period,
+      target_duration: payload.targetDuration ?? 0,
+    })
+    .select("id, title, type, kind, count, period, target_duration, created_at, archived_at")
+    .single();
+
+  if (error || !data) return null;
+  return {
+    id: data.id,
+    title: data.title,
+    type: data.type,
+    kind: data.kind as "check" | "amount",
+    count: data.count,
+    period: data.period,
+    targetDuration: data.target_duration,
+    createdAt: data.created_at,
+    archivedAt: data.archived_at,
+  };
+}
+
+export async function updateHabit(
+  supabase: SupabaseClient,
+  userId: string,
+  habitId: string,
+  updates: Partial<CreateHabitPayload>
+): Promise<boolean> {
+  const body: Record<string, unknown> = {};
+  if (updates.title !== undefined) body.title = updates.title;
+  if (updates.type !== undefined) body.type = updates.type;
+  if (updates.kind !== undefined) body.kind = updates.kind;
+  if (updates.count !== undefined) body.count = updates.count;
+  if (updates.period !== undefined) body.period = updates.period;
+  if (updates.targetDuration !== undefined) body.target_duration = updates.targetDuration;
+  if (Object.keys(body).length === 0) return true;
+
+  const { error } = await supabase
+    .from("habits")
+    .update(body)
+    .eq("id", habitId)
+    .eq("user_id", userId);
+  return !error;
+}
+
+export async function deleteHabit(
+  supabase: SupabaseClient,
+  userId: string,
+  habitId: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from("habits")
+    .delete()
+    .eq("id", habitId)
+    .eq("user_id", userId);
+  return !error;
 }

@@ -61,6 +61,12 @@ type ChatPanelProps = {
   morningFlowStatus: string;
   latestReflection?: WeeklyReflection | null;
   aiTone?: "standard" | "gentle";
+  identityProfile?: {
+    valuesDocument?: string;
+    currentPhase?: string;
+    coreValues?: string[];
+  } | null;
+  aiAdditionalContext?: string;
   onTasksChanged: () => void;
   onEventsChanged: () => void;
   onHabitSessionAdded: (session: HabitSession) => void;
@@ -111,6 +117,8 @@ export default function ChatPanel({
   morningFlowStatus,
   latestReflection,
   aiTone,
+  identityProfile,
+  aiAdditionalContext,
   onTasksChanged,
   onEventsChanged,
   onHabitSessionAdded,
@@ -184,10 +192,13 @@ export default function ChatPanel({
       focus3,
       morningFlowStatus,
       latestReflection,
+      identityProfile,
+      aiAdditionalContext,
     });
   }, [
     todayKey, goals, tasks, completedTasks, events, habits, habitSessions,
     identityMetrics, yesterdayIdentityMetrics, focus3, morningFlowStatus, latestReflection,
+    identityProfile, aiAdditionalContext,
   ]);
 
   // ── Send Message ───────────────────────────────────────────────────────
