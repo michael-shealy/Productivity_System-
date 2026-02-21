@@ -23,10 +23,10 @@ So the failure was almost certainly a **redirect_uri** that didn’t match the d
 ## What we changed
 
 1. **Request-based redirect_uri in production**  
-   In both `/api/google/auth/start` and `/api/google/auth/callback`, the redirect URI is now derived from the **incoming request** when `NODE_ENV === "production"`:
-   - `origin = new URL(request.url).origin`
-   - `redirect_uri = origin + "/api/google/auth/callback"`
-   So the callback always goes to the **same host** the user is on (the deployment that served the page). No dependency on `GOOGLE_REDIRECT_URI` in production.
+   In both `/api/google/auth/start` and `/api/google/auth/callback`, the redirect URI is now derived so the callback hits the same deployment and **matches Google’s allowed list**:
+   - **Production:** Prefer the public origin from `x-forwarded-host` + `x-forwarded-proto` (so custom domains and the URL the user actually sees are used). If those headers are missing, use `https://${VERCEL_URL}` (Vercel’s system env). Fallback: `request.url`.origin.  
+   - **Development:** Use `GOOGLE_REDIRECT_URI` if set, otherwise `request.url`.origin.  
+   This avoids both 404 DEPLOYMENT_NOT_FOUND (wrong host) and **400 redirect_uri_mismatch** (on Vercel, `request.url` can be an internal URL, so we must use forwarded headers or `VERCEL_URL`).
 
 2. **Development**  
    In development we still use `GOOGLE_REDIRECT_URI` if set, otherwise the request origin (so localhost works with or without the env var).
@@ -43,10 +43,11 @@ So the failure was almost certainly a **redirect_uri** that didn’t match the d
 ## What you need to do
 
 - **Google Cloud Console**  
-  In your OAuth client’s **Authorized redirect URIs**, add the **exact** production URL:
-  - `https://<your-vercel-production-domain>/api/google/auth/callback`  
+  In your OAuth client’s **Authorized redirect URIs**, add the **exact** production URL (must match character-for-character what the app sends):
+  - Default Vercel domain: `https://<your-project>.vercel.app/api/google/auth/callback`  
+  - Custom domain: `https://<your-custom-domain>/api/google/auth/callback`  
   Example: `https://productivity-system.vercel.app/api/google/auth/callback`.  
-  You can remove any old or preview URLs that you no longer use.
+  If you get **400: redirect_uri_mismatch**, the app is now sending the public URL (from `x-forwarded-host` or `VERCEL_URL`); copy the exact URL from the error’s “Request Details” in Google’s error page, or use your browser’s address bar when on the app (same origin + `/api/google/auth/callback`) and add that to Authorized redirect URIs.
 
 - **Vercel**  
   You do **not** need to set `GOOGLE_REDIRECT_URI` in Vercel for production. If it’s set to an old or wrong URL, you can remove it; the app will use the request origin. Redeploy after any env change.

@@ -10,9 +10,25 @@ function getEnv(name: string) {
   return value;
 }
 
-/** Must match the redirect_uri used in auth start (request-based so callback hits same deployment). */
+/** Build public origin (must match auth start). Uses x-forwarded-* / VERCEL_URL on Vercel so redirect_uri matches Google Console. */
+function getOrigin(request: Request): string {
+  if (process.env.NODE_ENV !== "production") {
+    return new URL(request.url).origin;
+  }
+  const host = request.headers.get("x-forwarded-host");
+  const proto = request.headers.get("x-forwarded-proto") ?? "https";
+  if (host) {
+    return `${proto}://${host}`;
+  }
+  const vercelUrl = process.env.VERCEL_URL;
+  if (vercelUrl) {
+    return `https://${vercelUrl}`;
+  }
+  return new URL(request.url).origin;
+}
+
 function getRedirectUri(request: Request): string {
-  const origin = new URL(request.url).origin;
+  const origin = getOrigin(request);
   const fromRequest = `${origin}/api/google/auth/callback`;
   if (process.env.NODE_ENV === "production") return fromRequest;
   return process.env.GOOGLE_REDIRECT_URI || fromRequest;
@@ -109,7 +125,7 @@ export async function GET(request: Request) {
     tokenData.expires_in
   );
 
-  const origin = new URL(request.url).origin;
+  const origin = getOrigin(request);
   const response = NextResponse.redirect(`${origin}/`);
   // Clear the CSRF state cookie
   response.cookies.set("oauth_state_google", "", {

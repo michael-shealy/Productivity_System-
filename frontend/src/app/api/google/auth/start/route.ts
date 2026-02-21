@@ -9,9 +9,25 @@ function getEnv(name: string) {
   return value;
 }
 
-/** Use request origin in production so callback always hits the same deployment (fixes Vercel 404 DEPLOYMENT_NOT_FOUND). Env override only in development or proxy setups. */
+/** Build public origin so redirect_uri matches Google Console (Vercel can expose internal request.url). */
+function getOrigin(request: Request): string {
+  if (process.env.NODE_ENV !== "production") {
+    return new URL(request.url).origin;
+  }
+  const host = request.headers.get("x-forwarded-host");
+  const proto = request.headers.get("x-forwarded-proto") ?? "https";
+  if (host) {
+    return `${proto}://${host}`;
+  }
+  const vercelUrl = process.env.VERCEL_URL;
+  if (vercelUrl) {
+    return `https://${vercelUrl}`;
+  }
+  return new URL(request.url).origin;
+}
+
 function getRedirectUri(request: Request): string {
-  const origin = new URL(request.url).origin;
+  const origin = getOrigin(request);
   const fromRequest = `${origin}/api/google/auth/callback`;
   if (process.env.NODE_ENV === "production") return fromRequest;
   return process.env.GOOGLE_REDIRECT_URI || fromRequest;
