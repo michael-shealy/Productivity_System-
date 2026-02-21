@@ -9,14 +9,22 @@ function getEnv(name: string) {
   return value;
 }
 
-export async function GET() {
+/** Use request origin in production so callback always hits the same deployment (fixes Vercel 404 DEPLOYMENT_NOT_FOUND). Env override only in development or proxy setups. */
+function getRedirectUri(request: Request): string {
+  const origin = new URL(request.url).origin;
+  const fromRequest = `${origin}/api/google/auth/callback`;
+  if (process.env.NODE_ENV === "production") return fromRequest;
+  return process.env.GOOGLE_REDIRECT_URI || fromRequest;
+}
+
+export async function GET(request: Request) {
   const { user } = await getRouteUser();
   if (!user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
   const clientId = getEnv("GOOGLE_CLIENT_ID");
-  const redirectUri = getEnv("GOOGLE_REDIRECT_URI");
+  const redirectUri = getRedirectUri(request);
   const state = crypto.randomUUID();
 
   const params = new URLSearchParams({

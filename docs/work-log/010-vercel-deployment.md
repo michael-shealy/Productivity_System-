@@ -26,7 +26,7 @@ Add in **Vercel → Project → Settings → Environment Variables**. Use **Prod
 | `TODOIST_REDIRECT_URI` | `https://<your-vercel-domain>/api/todoist/auth/callback` | Must match exactly what you register in Todoist |
 | `GOOGLE_CLIENT_ID` | (same as local) | From Google Cloud OAuth client |
 | `GOOGLE_CLIENT_SECRET` | (same as local) | From Google Cloud OAuth client |
-| `GOOGLE_REDIRECT_URI` | `https://<your-vercel-domain>/api/google/auth/callback` | Must match exactly what you register in Google |
+| `GOOGLE_REDIRECT_URI` | *(optional in production)* | In production the app uses the request host. Only set for local dev or proxy; see work-log 012. |
 | `ANTHROPIC_API_KEY` | (same as local) | For AI briefing API route |
 | `NEXT_PUBLIC_SUPABASE_URL` | (same as local) | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | (same as local) | Supabase anon key |

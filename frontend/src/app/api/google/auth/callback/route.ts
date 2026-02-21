@@ -10,6 +10,14 @@ function getEnv(name: string) {
   return value;
 }
 
+/** Must match the redirect_uri used in auth start (request-based so callback hits same deployment). */
+function getRedirectUri(request: Request): string {
+  const origin = new URL(request.url).origin;
+  const fromRequest = `${origin}/api/google/auth/callback`;
+  if (process.env.NODE_ENV === "production") return fromRequest;
+  return process.env.GOOGLE_REDIRECT_URI || fromRequest;
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
@@ -62,7 +70,7 @@ export async function GET(request: Request) {
 
   const clientId = getEnv("GOOGLE_CLIENT_ID");
   const clientSecret = getEnv("GOOGLE_CLIENT_SECRET");
-  const redirectUri = getEnv("GOOGLE_REDIRECT_URI");
+  const redirectUri = getRedirectUri(request);
 
   const params = new URLSearchParams({
     code,
