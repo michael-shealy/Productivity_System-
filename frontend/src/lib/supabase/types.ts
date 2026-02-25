@@ -172,3 +172,55 @@ export type IdentityProfile = {
   comparisonProtocol: Record<string, unknown> | null;
   phaseMetadata: Record<string, unknown> | null;
 };
+
+// ── AI Observations ──────────────────────────────────────────────────
+
+export type ObservationScope = "daily" | "weekly" | "quarterly";
+export type AnalysisDepth = "7day" | "30day" | "full";
+export type ObservationCategory =
+  | "habit_trend"
+  | "identity_pattern"
+  | "schedule_insight"
+  | "reflection_theme"
+  | "energy_pattern"
+  | "growth_signal"
+  | "task_trend";
+export type DismissReason = "intentional" | "outdated" | "incorrect";
+
+export type EntityRef = {
+  type: "habit" | "goal" | "identity_metric";
+  id: string;
+};
+
+export type DbAIObservation = {
+  id: string;
+  user_id: string;
+  scope: ObservationScope;
+  analysis_depth: AnalysisDepth;
+  category: string;
+  observation: string;
+  date_ref: string;
+  entity_refs: EntityRef[];
+  confidence: number;
+  dismissed: boolean;
+  dismiss_reason: DismissReason | null;
+  dismiss_note: string | null;
+  superseded_by: string | null;
+  created_at: string;
+};
+
+export type AIObservation = {
+  id: string;
+  scope: ObservationScope;
+  analysisDepth: AnalysisDepth;
+  category: ObservationCategory;
+  observation: string;
+  dateRef: string;
+  entityRefs: EntityRef[];
+  confidence: number;
+  dismissed: boolean;
+  dismissReason: DismissReason | null;
+  dismissNote: string | null;
+  supersededBy: string | null;
+  createdAt: string;
+};

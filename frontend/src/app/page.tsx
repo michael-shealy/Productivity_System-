@@ -35,11 +35,15 @@ import {
   loadPreviousFourWeekReview,
   upsertFourWeekReview,
   loadIdentityProfile,
+  loadAllObservations,
+  dismissObservation,
+  undismissObservation,
 } from "@/lib/supabase/data";
-import type { WeeklyReflection, UserPreferences, IdentityProfile } from "@/lib/supabase/types";
+import type { WeeklyReflection, UserPreferences, IdentityProfile, AIObservation } from "@/lib/supabase/types";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import ChatPanel from "@/components/ChatPanel";
-import DashboardHeader from "@/components/DashboardHeader";
+import DashboardHeader, { type DashboardTab } from "@/components/DashboardHeader";
+import PatternsPanel from "@/components/PatternsPanel";
 import MorningFlowBanner from "@/components/MorningFlowBanner";
 import InsightsSection from "@/components/InsightsSection";
 import IdentityCheck, { identityQuestions } from "@/components/IdentityCheck";
@@ -186,7 +190,8 @@ export default function Home() {
     Array<{ id: string; name: string; primary: boolean }>
   >([]);
   const [selectedCalendarIds, setSelectedCalendarIds] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<"practice" | "tasks">("practice");
+  const [activeTab, setActiveTab] = useState<DashboardTab>("practice");
+  const [aiObservations, setAiObservations] = useState<AIObservation[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
   const [identityMetrics, setIdentityMetrics] = useState({
     morningGrounding: false,
@@ -325,6 +330,7 @@ export default function Home() {
         flowData,
         focus3Data,
         profileData,
+        observationsData,
       ] = await Promise.all([
         loadHabits(sb, authUser.id),
         loadHabitSessions(sb, authUser.id),
@@ -333,6 +339,7 @@ export default function Home() {
         loadMorningFlow(sb, authUser.id, dateKey),
         loadFocus3(sb, authUser.id, dateKey),
         loadIdentityProfile(sb, authUser.id),
+        loadAllObservations(sb, authUser.id),
       ]);
 
       if (cancelled) return;
@@ -353,6 +360,7 @@ export default function Home() {
         f3d({ type: "LOAD_FROM_DB", items: focus3Data.items, reasoning: focus3Data.aiReasoning ?? "" });
       }
       f3d({ type: "DATA_LOADED" });
+      if (observationsData.length) setAiObservations(observationsData);
     }
 
     init();
@@ -1422,6 +1430,8 @@ export default function Home() {
     identityProfile,
     aiAdditionalContext: userPreferences?.aiAdditionalContext,
   };
+  const aiObservationsRef = useRef(aiObservations);
+  aiObservationsRef.current = aiObservations;
   const focus3HasData =
     dueTodayTasks.length > 0 || todayAgendaEvents.length > 0 || activeHabits.length > 0 || habitStats.length > 0;
 
@@ -1471,6 +1481,10 @@ export default function Home() {
         coreValues: (ctx.identityProfile.phaseMetadata as { coreValues?: string[] } | null)?.coreValues ?? undefined,
       } : undefined,
       aiAdditionalContext: ctx.aiAdditionalContext,
+      aiObservations: aiObservationsRef.current
+        .filter((o) => !o.dismissed && !o.supersededBy && (o.category === "habit_trend" || o.category === "identity_pattern"))
+        .slice(0, 3)
+        .map((o) => ({ category: o.category, observation: o.observation })),
     };
 
     fetch("/api/ai/focus3", {
@@ -1565,6 +1579,10 @@ export default function Home() {
     ) {
       setMorningBriefing(aiBriefing.briefing);
       setInsightsBriefing(aiBriefing.briefing.insights);
+      // Briefing may have generated new observations — refresh
+      if (supabase && user) {
+        loadAllObservations(supabase, user.id).then((obs) => setAiObservations(obs));
+      }
       return;
     }
 
@@ -1572,6 +1590,10 @@ export default function Home() {
     if (pendingMorningBriefingRefresh) {
       setMorningBriefing(aiBriefing.briefing);
       setPendingMorningBriefingRefresh(false);
+      // Refresh observations after briefing regeneration
+      if (supabase && user) {
+        loadAllObservations(supabase, user.id).then((obs) => setAiObservations(obs));
+      }
       return;
     }
 
@@ -1586,6 +1608,8 @@ export default function Home() {
     insightsBriefing,
     pendingInsightsRefresh,
     pendingMorningBriefingRefresh,
+    supabase,
+    user,
   ]);
 
   const handleMorningBriefingRefresh = () => {
@@ -4091,6 +4115,34 @@ export default function Home() {
             />
           </>
         )}
+
+        {activeTab === "patterns" && (
+          <PatternsPanel
+            observations={aiObservations}
+            onDismiss={async (id, reason, note) => {
+              if (!supabase || !user) return;
+              const ok = await dismissObservation(supabase, user.id, id, reason, note);
+              if (ok) {
+                setAiObservations((prev) =>
+                  prev.map((o) =>
+                    o.id === id ? { ...o, dismissed: true, dismissReason: reason, dismissNote: note ?? null } : o
+                  )
+                );
+              }
+            }}
+            onUndismiss={async (id) => {
+              if (!supabase || !user) return;
+              const ok = await undismissObservation(supabase, user.id, id);
+              if (ok) {
+                setAiObservations((prev) =>
+                  prev.map((o) =>
+                    o.id === id ? { ...o, dismissed: false, dismissReason: null, dismissNote: null } : o
+                  )
+                );
+              }
+            }}
+          />
+        )}
       </main>
       {supabase && user && (
         <ChatPanel
@@ -4117,6 +4169,7 @@ export default function Home() {
             coreValues: (identityProfile.phaseMetadata as { coreValues?: string[] } | null)?.coreValues ?? undefined,
           } : undefined}
           aiAdditionalContext={userPreferences?.aiAdditionalContext}
+          aiObservations={aiObservations.filter((o) => !o.dismissed && !o.supersededBy).slice(0, 8).map((o) => ({ category: o.category, observation: o.observation, dateRef: o.dateRef }))}
           onTasksChanged={() => loadTodoist(true)}
           onEventsChanged={() => loadCalendar(true)}
           onHabitSessionAdded={(session) => setHabitSessions((prev) => [session, ...prev])}

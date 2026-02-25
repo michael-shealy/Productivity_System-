@@ -1,8 +1,10 @@
 "use client";
 
+export type DashboardTab = "practice" | "tasks" | "patterns";
+
 type DashboardHeaderProps = {
-  activeTab: "practice" | "tasks";
-  setActiveTab: (tab: "practice" | "tasks") => void;
+  activeTab: DashboardTab;
+  setActiveTab: (tab: DashboardTab) => void;
   chatOpen: boolean;
   setChatOpen: (open: boolean | ((v: boolean) => boolean)) => void;
   handleLogout: () => void;
@@ -88,6 +90,17 @@ export default function DashboardHeader({
             }`}
           >
             Tasks
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("patterns")}
+            className={`rounded-full px-4 py-2 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+              activeTab === "patterns"
+                ? "bg-amber-500/20 text-amber-200"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            Patterns
           </button>
         </div>
       </div>

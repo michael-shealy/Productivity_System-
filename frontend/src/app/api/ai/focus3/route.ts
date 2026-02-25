@@ -116,6 +116,12 @@ function buildUserPrompt(ctx: Focus3AIRequest): string {
     sections.push(`Additional user context: ${ctx.aiAdditionalContext}`);
   }
 
+  if (ctx.aiObservations && ctx.aiObservations.length > 0) {
+    sections.push(
+      `Recent AI observations (for context):\n${ctx.aiObservations.map((o) => `- [${o.category}] ${o.observation}`).join("\n")}`
+    );
+  }
+
   return sections.join("\n\n");
 }
 

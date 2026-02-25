@@ -6,6 +6,12 @@ import type {
   WeeklyReflection,
   UserPreferences,
   IdentityProfile,
+  AIObservation,
+  ObservationScope,
+  AnalysisDepth,
+  ObservationCategory,
+  DismissReason,
+  EntityRef,
 } from "@/lib/supabase/types";
 
 // ── Identity Metrics ──────────────────────────────────────────────────
@@ -943,4 +949,274 @@ export async function deleteHabit(
     .eq("id", habitId)
     .eq("user_id", userId);
   return !error;
+}
+
+// ── AI Observations ──────────────────────────────────────────────────
+
+function mapObservationRow(row: Record<string, unknown>): AIObservation {
+  return {
+    id: row.id as string,
+    scope: row.scope as ObservationScope,
+    analysisDepth: row.analysis_depth as AnalysisDepth,
+    category: row.category as ObservationCategory,
+    observation: row.observation as string,
+    dateRef: row.date_ref as string,
+    entityRefs: (row.entity_refs ?? []) as EntityRef[],
+    confidence: row.confidence as number,
+    dismissed: row.dismissed as boolean,
+    dismissReason: (row.dismiss_reason ?? null) as DismissReason | null,
+    dismissNote: (row.dismiss_note ?? null) as string | null,
+    supersededBy: (row.superseded_by ?? null) as string | null,
+    createdAt: row.created_at as string,
+  };
+}
+
+export async function loadActiveObservations(
+  supabase: SupabaseClient,
+  userId: string,
+  limit = 10
+): Promise<AIObservation[]> {
+  const { data } = await supabase
+    .from("ai_observations")
+    .select("*")
+    .eq("user_id", userId)
+    .is("superseded_by", null)
+    .eq("dismissed", false)
+    .order("confidence", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (!data) return [];
+  return data.map(mapObservationRow);
+}
+
+export async function loadAllObservations(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<AIObservation[]> {
+  const { data } = await supabase
+    .from("ai_observations")
+    .select("*")
+    .eq("user_id", userId)
+    .is("superseded_by", null)
+    .order("created_at", { ascending: false });
+
+  if (!data) return [];
+  return data.map(mapObservationRow);
+}
+
+export async function loadObservationsForDate(
+  supabase: SupabaseClient,
+  userId: string,
+  date: string
+): Promise<AIObservation[]> {
+  const { data } = await supabase
+    .from("ai_observations")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("date_ref", date)
+    .eq("scope", "daily");
+
+  if (!data) return [];
+  return data.map(mapObservationRow);
+}
+
+export type InsertObservationPayload = {
+  scope: ObservationScope;
+  analysisDepth: AnalysisDepth;
+  category: string;
+  observation: string;
+  dateRef: string;
+  entityRefs?: EntityRef[];
+  confidence: number;
+};
+
+export async function insertObservations(
+  supabase: SupabaseClient,
+  userId: string,
+  observations: InsertObservationPayload[]
+): Promise<AIObservation[]> {
+  if (observations.length === 0) return [];
+  const rows = observations.map((o) => ({
+    user_id: userId,
+    scope: o.scope,
+    analysis_depth: o.analysisDepth,
+    category: o.category,
+    observation: o.observation,
+    date_ref: o.dateRef,
+    entity_refs: o.entityRefs ?? [],
+    confidence: o.confidence,
+  }));
+
+  const { data, error } = await supabase
+    .from("ai_observations")
+    .insert(rows)
+    .select("*");
+
+  if (error || !data) return [];
+  return data.map(mapObservationRow);
+}
+
+export async function dismissObservation(
+  supabase: SupabaseClient,
+  userId: string,
+  id: string,
+  reason: DismissReason,
+  note?: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from("ai_observations")
+    .update({
+      dismissed: true,
+      dismiss_reason: reason,
+      dismiss_note: note ?? null,
+    })
+    .eq("id", id)
+    .eq("user_id", userId);
+  return !error;
+}
+
+export async function undismissObservation(
+  supabase: SupabaseClient,
+  userId: string,
+  id: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from("ai_observations")
+    .update({
+      dismissed: false,
+      dismiss_reason: null,
+      dismiss_note: null,
+    })
+    .eq("id", id)
+    .eq("user_id", userId);
+  return !error;
+}
+
+export async function supersedeObservations(
+  supabase: SupabaseClient,
+  userId: string,
+  ids: string[],
+  supersededById: string
+): Promise<boolean> {
+  if (ids.length === 0) return true;
+  const { error } = await supabase
+    .from("ai_observations")
+    .update({ superseded_by: supersededById })
+    .in("id", ids)
+    .eq("user_id", userId);
+  return !error;
+}
+
+export async function countActiveObservations(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<number> {
+  const { count } = await supabase
+    .from("ai_observations")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .is("superseded_by", null)
+    .eq("dismissed", false);
+  return count ?? 0;
+}
+
+export async function pruneObservations(
+  supabase: SupabaseClient,
+  userId: string,
+  maxActive: number
+): Promise<void> {
+  const active = await countActiveObservations(supabase, userId);
+  if (active <= maxActive) return;
+
+  const excess = active - maxActive;
+  const { data } = await supabase
+    .from("ai_observations")
+    .select("id")
+    .eq("user_id", userId)
+    .is("superseded_by", null)
+    .eq("dismissed", false)
+    .order("confidence", { ascending: true })
+    .order("created_at", { ascending: true })
+    .limit(excess);
+
+  if (!data?.length) return;
+  await supabase
+    .from("ai_observations")
+    .delete()
+    .in("id", data.map((r) => r.id))
+    .eq("user_id", userId);
+}
+
+export async function getLastAnalysisDate(
+  supabase: SupabaseClient,
+  userId: string,
+  depth: AnalysisDepth
+): Promise<string | null> {
+  const { data } = await supabase
+    .from("ai_observations")
+    .select("date_ref")
+    .eq("user_id", userId)
+    .eq("analysis_depth", depth)
+    .order("date_ref", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return data?.date_ref as string | null;
+}
+
+export async function loadIdentityMetricsRange(
+  supabase: SupabaseClient,
+  userId: string,
+  days: number,
+  endDate?: string
+): Promise<Array<{ date: string; morningGrounding: boolean; embodiedMovement: boolean; nutritionalAwareness: boolean; presentConnection: boolean; curiositySpark: boolean }>> {
+  const anchor = endDate ? new Date(endDate + "T12:00:00") : new Date();
+  const cutoff = new Date(anchor);
+  cutoff.setDate(cutoff.getDate() - days);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  let query = supabase
+    .from("daily_identity_metrics")
+    .select("date, morning_grounding, embodied_movement, nutritional_awareness, present_connection, curiosity_spark")
+    .eq("user_id", userId)
+    .gte("date", cutoffStr)
+    .order("date", { ascending: false });
+
+  if (endDate) {
+    query = query.lte("date", endDate);
+  }
+
+  const { data } = await query;
+
+  if (!data) return [];
+  return data.map((row) => ({
+    date: row.date as string,
+    morningGrounding: row.morning_grounding as boolean,
+    embodiedMovement: row.embodied_movement as boolean,
+    nutritionalAwareness: row.nutritional_awareness as boolean,
+    presentConnection: row.present_connection as boolean,
+    curiositySpark: row.curiosity_spark as boolean,
+  }));
+}
+
+export async function loadRecentDismissedObservations(
+  supabase: SupabaseClient,
+  userId: string,
+  withinDays = 30
+): Promise<AIObservation[]> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - withinDays);
+  const cutoffStr = cutoff.toISOString();
+
+  const { data } = await supabase
+    .from("ai_observations")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("dismissed", true)
+    .gte("created_at", cutoffStr)
+    .order("created_at", { ascending: false });
+
+  if (!data) return [];
+  return data.map(mapObservationRow);
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import type { AIBriefingRequest, AIBriefingResponse, AIInsightCard } from "@/lib/ai";
 import { getRouteUser } from "@/lib/supabase/route";
+import { runObservationPipeline } from "@/lib/ai-observations";
 
 const SYSTEM_PROMPT_BASE = `You are a calm, identity-focused daily coach embedded in a personal productivity system.
 
@@ -47,7 +48,7 @@ function getSystemPrompt(aiTone?: "standard" | "gentle"): string {
   return SYSTEM_PROMPT_BASE + gentle + SYSTEM_PROMPT_JSON;
 }
 
-function buildUserPrompt(ctx: AIBriefingRequest): string {
+function buildUserPrompt(ctx: AIBriefingRequest, observations?: Array<{ category: string; observation: string; dateRef: string }>): string {
   const sections: string[] = [];
 
   sections.push(`Today: ${ctx.today}`);
@@ -128,6 +129,12 @@ function buildUserPrompt(ctx: AIBriefingRequest): string {
     sections.push(`Additional user context: ${ctx.aiAdditionalContext}`);
   }
 
+  if (observations && observations.length > 0) {
+    sections.push(
+      `Longitudinal patterns (AI memory — reference these when relevant):\n${observations.map((o) => `- [${o.category}] ${o.observation} (from ${o.dateRef})`).join("\n")}`
+    );
+  }
+
   return sections.join("\n\n");
 }
 
@@ -174,7 +181,7 @@ function validateResponse(obj: Record<string, unknown>): AIBriefingResponse {
 }
 
 export async function POST(request: Request) {
-  const { user } = await getRouteUser();
+  const { supabase, user } = await getRouteUser();
   if (!user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
@@ -196,6 +203,26 @@ export async function POST(request: Request) {
 
   const client = new Anthropic({ apiKey });
 
+  // Run observation pipeline (generates/consolidates pattern observations)
+  let observationsForPrompt: Array<{ category: string; observation: string; dateRef: string }> = [];
+  try {
+    const topObs = await runObservationPipeline(
+      client,
+      supabase,
+      user.id,
+      ctx.today,
+      ctx.habitStats,
+      ctx.completedTasks
+    );
+    observationsForPrompt = topObs.map((o) => ({
+      category: o.category,
+      observation: o.observation,
+      dateRef: o.dateRef,
+    }));
+  } catch (err) {
+    console.error("Observation pipeline failed (non-blocking):", err);
+  }
+
   try {
     const message = await client.messages.create({
       model: "claude-sonnet-4-5-20250929",
@@ -204,7 +231,7 @@ export async function POST(request: Request) {
       messages: [
         {
           role: "user",
-          content: buildUserPrompt(ctx),
+          content: buildUserPrompt(ctx, observationsForPrompt),
         },
       ],
     });

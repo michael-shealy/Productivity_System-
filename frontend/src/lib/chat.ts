@@ -210,6 +210,7 @@ export type ChatContext = {
     coreValues?: string[];
   } | null;
   aiAdditionalContext?: string;
+  aiObservations?: Array<{ category: string; observation: string; dateRef: string }>;
 };
 
 export function buildChatContextMessage(ctx: ChatContext): string {
@@ -303,6 +304,12 @@ export function buildChatContextMessage(ctx: ChatContext): string {
 
   if (ctx.aiAdditionalContext) {
     sections.push(`Additional user context: ${ctx.aiAdditionalContext}`);
+  }
+
+  if (ctx.aiObservations && ctx.aiObservations.length > 0) {
+    sections.push(
+      `AI memory (longitudinal patterns):\n${ctx.aiObservations.map((o) => `- [${o.category}] ${o.observation} (from ${o.dateRef})`).join("\n")}`
+    );
   }
 
   return sections.join("\n\n");

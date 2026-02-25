@@ -79,6 +79,7 @@ export type Focus3AIRequest = {
   aiTone?: "standard" | "gentle";
   identityProfile?: IdentityProfileForAI;
   aiAdditionalContext?: string;
+  aiObservations?: Array<{ category: string; observation: string }>;
 };
 
 export type Focus3AIResponse = {
