@@ -11,7 +11,9 @@ import {
   supersedeObservations,
   pruneObservations,
   getLastAnalysisDate,
+  loadWeatherRange,
   type InsertObservationPayload,
+  type DailyWeatherRow,
 } from "@/lib/supabase/data";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -48,6 +50,7 @@ export type AnalysisData = {
   existingObservations: AIObservation[];
   dismissedObservations: AIObservation[];
   completedTasks?: Array<{ title: string }>;
+  weatherHistory?: DailyWeatherRow[];
 };
 
 type RawObservation = {
@@ -91,7 +94,8 @@ Rules:
 - If labeled "outdated", the pattern has changed — look for what replaced it
 - Higher confidence = more data points supporting the pattern
 - When completed tasks data is provided, look for task completion patterns: recurring themes, velocity changes, types of tasks completed, and alignment with stated goals and identity practices
-- COHESION CHECK: Before outputting, review all observations as a group. Each must add DISTINCT value — no two should cover the same habit, metric, or theme from a similar angle. If two observations reference the same entity (e.g., same habit streak), merge them or drop the weaker one. Vary framing: if one cites a streak, another should focus on rhythm, timing, or cross-habit correlation instead of another streak.`;
+- COHESION CHECK: Before outputting, review all observations as a group. Each must add DISTINCT value — no two should cover the same habit, metric, or theme from a similar angle. If two observations reference the same entity (e.g., same habit streak), merge them or drop the weaker one. Vary framing: if one cites a streak, another should focus on rhythm, timing, or cross-habit correlation instead of another streak.
+- When weather history is provided, look for weather-behavior correlations (e.g., outdoor movement drops on rainy days, grounding practice affected by extreme temps). Only note these if the pattern is clear across multiple days.`;
 
 // ── Frequency Logic ────────────────────────────────────────────────────
 
@@ -163,6 +167,14 @@ function buildAnalysisContext(depth: AnalysisDepth, data: AnalysisData): string 
     sections.push(
       `User-corrected observations (respect these corrections):\n${data.dismissedObservations.map((o) =>
         `- [${o.category}] "${o.observation}" → dismissed as "${o.dismissReason}"${o.dismissNote ? `: ${o.dismissNote}` : ""}`
+      ).join("\n")}`
+    );
+  }
+
+  if (data.weatherHistory && data.weatherHistory.length > 0) {
+    sections.push(
+      `Recent weather history:\n${data.weatherHistory.map((w) =>
+        `${w.date}: ${w.condition}, H:${w.tempHigh}°F L:${w.tempLow}°F, ${w.precipChance}% precip`
       ).join("\n")}`
     );
   }
@@ -372,8 +384,11 @@ export async function runObservationPipeline(
   const dismissed = await loadRecentDismissedObservations(supabase, userId, 30);
 
   // Always run 7-day analysis (through yesterday)
-  const metrics7 = await loadIdentityMetricsRange(supabase, userId, 7, yesterday);
-  const reflections = await loadRecentWeeklyReflections(supabase, userId, 1);
+  const [metrics7, reflections, weatherHistory] = await Promise.all([
+    loadIdentityMetricsRange(supabase, userId, 7, yesterday),
+    loadRecentWeeklyReflections(supabase, userId, 1),
+    loadWeatherRange(supabase, userId, 7),
+  ]);
   const baseData: AnalysisData = {
     today: yesterday,
     habitStats,
@@ -387,6 +402,7 @@ export async function runObservationPipeline(
     existingObservations: existingActive,
     dismissedObservations: dismissed,
     completedTasks,
+    weatherHistory,
   };
 
   try {

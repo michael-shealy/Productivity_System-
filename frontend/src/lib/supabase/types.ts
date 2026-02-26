@@ -121,11 +121,18 @@ export type IdentityQuestionConfig = {
   helper: string;
 };
 
+export type WeatherLocation = {
+  name: string;
+  latitude: number;
+  longitude: number;
+};
+
 export type UserPreferences = {
   aiTone?: "standard" | "gentle";
   onboardingCompleted?: boolean;
   identityQuestions?: IdentityQuestionConfig[];
   aiAdditionalContext?: string;
+  location?: WeatherLocation;
 };
 
 export type DbUserPreferences = {

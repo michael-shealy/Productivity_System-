@@ -94,6 +94,9 @@ function getActiveStreak(
   let streak = 0;
   const cursor = new Date(todayDate);
   cursor.setDate(cursor.getDate() - cursor.getDay());
+  if (!successWeekKeys.has(toDateKey(cursor))) {
+    cursor.setDate(cursor.getDate() - 7);
+  }
   while (true) {
     const key = toDateKey(cursor);
     if (!successWeekKeys.has(key)) break;

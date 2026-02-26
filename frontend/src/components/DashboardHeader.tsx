@@ -1,5 +1,7 @@
 "use client";
 
+import type { WeatherData } from "@/lib/weather";
+
 export type DashboardTab = "practice" | "tasks" | "patterns";
 
 type DashboardHeaderProps = {
@@ -9,6 +11,8 @@ type DashboardHeaderProps = {
   setChatOpen: (open: boolean | ((v: boolean) => boolean)) => void;
   handleLogout: () => void;
   resetMorningFlow: () => void;
+  weatherData?: WeatherData | null;
+  onChangeLocation?: () => void;
 };
 
 export default function DashboardHeader({
@@ -18,7 +22,11 @@ export default function DashboardHeader({
   setChatOpen,
   handleLogout,
   resetMorningFlow,
+  weatherData,
+  onChangeLocation,
 }: DashboardHeaderProps) {
+  const todayForecast = weatherData?.forecast?.[0];
+
   return (
     <>
       <header className="flex flex-col gap-2">
@@ -51,9 +59,29 @@ export default function DashboardHeader({
         <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl" style={{ textWrap: "balance" }}>
           Morning Briefing + Plan
         </h1>
-        <p className="text-sm text-zinc-400">
-          Calm, goal-aligned, and ready for check-ins anytime today.
-        </p>
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-sm text-zinc-400">
+            Calm, goal-aligned, and ready for check-ins anytime today.
+          </p>
+          {weatherData && todayForecast && (
+            <div className="flex shrink-0 items-center gap-1.5 text-sm text-zinc-300">
+              <span>{weatherData.current.emoji}</span>
+              <span className="font-medium">{weatherData.current.temperature}°F</span>
+              <span className="text-xs text-zinc-500">
+                H:{todayForecast.tempHigh}° L:{todayForecast.tempLow}°
+              </span>
+              {onChangeLocation && (
+                <button
+                  type="button"
+                  onClick={onChangeLocation}
+                  className="ml-1 text-xs text-zinc-600 hover:text-zinc-400"
+                >
+                  Change
+                </button>
+              )}
+            </div>
+          )}
+        </div>
         {activeTab === "practice" && (
           <div>
             <button

@@ -1,5 +1,6 @@
 import type { TaskContract, CalendarEventContract } from "@/lib/contracts";
 import type { Goal } from "@/lib/goals";
+import type { WeatherData } from "@/lib/weather";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ export type AIBriefingRequest = {
   identityProfile?: IdentityProfileForAI;
   customIdentityLabels?: string[];
   aiAdditionalContext?: string;
+  weather?: WeatherData | null;
 };
 
 export type AIInsightCard = {
@@ -80,6 +82,7 @@ export type Focus3AIRequest = {
   identityProfile?: IdentityProfileForAI;
   aiAdditionalContext?: string;
   aiObservations?: Array<{ category: string; observation: string }>;
+  weather?: WeatherData | null;
 };
 
 export type Focus3AIResponse = {
@@ -109,6 +112,7 @@ export function buildBriefingContext(opts: {
   identityProfile?: IdentityProfileForAI;
   customIdentityLabels?: string[];
   aiAdditionalContext?: string;
+  weather?: WeatherData | null;
 }): AIBriefingRequest {
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
@@ -163,6 +167,7 @@ export function buildBriefingContext(opts: {
     identityProfile: opts.identityProfile,
     customIdentityLabels: opts.customIdentityLabels,
     aiAdditionalContext: opts.aiAdditionalContext,
+    weather: opts.weather,
   };
 }
 

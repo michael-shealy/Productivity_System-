@@ -3,6 +3,7 @@ import type { Goal } from "@/lib/goals";
 import type { Habit, HabitSession } from "@/lib/habits";
 import type { WeeklyReflection } from "@/lib/supabase/types";
 import type { ChatMessage, ChatMessageContent } from "@/lib/supabase/data";
+import type { WeatherData } from "@/lib/weather";
 
 // ── SSE Event Types ─────────────────────────────────────────────────────
 
@@ -167,7 +168,8 @@ Scheduling intelligence:
 - Infer durations for common activities: Grocery/errands: 1hr, Workout: 1hr, Coffee/casual meeting: 45min, Study/deep work: 2hr, Quick errand: 30min, Doctor appointment: 1hr
 - For unusual or specific activities (thesis defense, interviews, etc.), ask the user how long they expect
 - If Google Calendar is not connected, inform the user gracefully and suggest connecting it in settings
-- Use the user's timezone (provided in context) for all event times`;
+- Use the user's timezone (provided in context) for all event times
+- Weather data is available for context. Reference it only when the user asks about weather directly, or when it would significantly affect a suggested activity (e.g., recommending indoor movement instead of an outdoor run due to storms). Do not volunteer weather commentary unless it materially changes your recommendation.`;
 
 const CHAT_SYSTEM_PROMPT_GENTLE = `
 Additional tone: The user has chosen "Gentle" mode. Use recovery-focused language. When habit adherence was low or the user mentions difficulty, emphasize minimums and that no catch-up is needed. Never guilt or deficit language. Be extra warm and affirming.`;
@@ -211,6 +213,7 @@ export type ChatContext = {
   } | null;
   aiAdditionalContext?: string;
   aiObservations?: Array<{ category: string; observation: string; dateRef: string }>;
+  weather?: WeatherData | null;
 };
 
 export function buildChatContextMessage(ctx: ChatContext): string {
@@ -310,6 +313,16 @@ export function buildChatContextMessage(ctx: ChatContext): string {
     sections.push(
       `AI memory (longitudinal patterns):\n${ctx.aiObservations.map((o) => `- [${o.category}] ${o.observation} (from ${o.dateRef})`).join("\n")}`
     );
+  }
+
+  if (ctx.weather) {
+    const w = ctx.weather;
+    const todayForecast = w.forecast[0];
+    const lines = [`Current: ${w.current.emoji} ${w.current.temperature}°F, ${w.current.condition} in ${w.location.name}`];
+    if (todayForecast) {
+      lines.push(`Today: H:${todayForecast.tempHigh}°F L:${todayForecast.tempLow}°F, ${todayForecast.precipChance}% precip, sunrise ${todayForecast.sunrise}, sunset ${todayForecast.sunset}`);
+    }
+    sections.push(`Weather:\n${lines.join("\n")}`);
   }
 
   return sections.join("\n\n");

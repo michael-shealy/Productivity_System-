@@ -5,6 +5,7 @@ import type { AIBriefingResponse } from "@/lib/ai";
 import type {
   WeeklyReflection,
   UserPreferences,
+  WeatherLocation,
   IdentityProfile,
   AIObservation,
   ObservationScope,
@@ -561,6 +562,12 @@ export async function loadUserPreferences(
   if (typeof prefs.ai_additional_context === "string") {
     result.aiAdditionalContext = prefs.ai_additional_context;
   }
+  if (prefs.location && typeof prefs.location === "object") {
+    const loc = prefs.location as Record<string, unknown>;
+    if (typeof loc.name === "string" && typeof loc.latitude === "number" && typeof loc.longitude === "number") {
+      result.location = { name: loc.name, latitude: loc.latitude, longitude: loc.longitude };
+    }
+  }
   return result;
 }
 
@@ -580,6 +587,9 @@ export async function saveUserPreferences(
   }
   if (preferences.aiAdditionalContext !== undefined) {
     prefsPayload.ai_additional_context = preferences.aiAdditionalContext;
+  }
+  if (preferences.location !== undefined) {
+    prefsPayload.location = preferences.location;
   }
   await supabase.from("user_preferences").upsert(
     {
@@ -1219,4 +1229,67 @@ export async function loadRecentDismissedObservations(
 
   if (!data) return [];
   return data.map(mapObservationRow);
+}
+
+// ── Daily Weather ─────────────────────────────────────────────────────
+
+export type DailyWeatherRow = {
+  date: string;
+  tempHigh: number;
+  tempLow: number;
+  condition: string;
+  weatherCode: number;
+  precipChance: number;
+  sunrise: string;
+  sunset: string;
+};
+
+export async function saveDailyWeather(
+  supabase: SupabaseClient,
+  userId: string,
+  weather: DailyWeatherRow
+): Promise<void> {
+  await supabase.from("daily_weather").upsert(
+    {
+      user_id: userId,
+      date: weather.date,
+      temp_high: weather.tempHigh,
+      temp_low: weather.tempLow,
+      condition: weather.condition,
+      weather_code: weather.weatherCode,
+      precip_chance: weather.precipChance,
+      sunrise: weather.sunrise,
+      sunset: weather.sunset,
+    },
+    { onConflict: "user_id,date" }
+  );
+}
+
+export async function loadWeatherRange(
+  supabase: SupabaseClient,
+  userId: string,
+  days: number
+): Promise<DailyWeatherRow[]> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  const { data } = await supabase
+    .from("daily_weather")
+    .select("date, temp_high, temp_low, condition, weather_code, precip_chance, sunrise, sunset")
+    .eq("user_id", userId)
+    .gte("date", cutoffStr)
+    .order("date", { ascending: false });
+
+  if (!data) return [];
+  return data.map((row) => ({
+    date: row.date as string,
+    tempHigh: row.temp_high as number,
+    tempLow: row.temp_low as number,
+    condition: row.condition as string,
+    weatherCode: row.weather_code as number,
+    precipChance: row.precip_chance as number,
+    sunrise: row.sunrise as string,
+    sunset: row.sunset as string,
+  }));
 }

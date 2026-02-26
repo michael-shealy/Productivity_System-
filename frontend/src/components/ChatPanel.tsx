@@ -8,6 +8,7 @@ import type { Goal } from "@/lib/goals";
 import type { Habit, HabitSession } from "@/lib/habits";
 import type { WeeklyReflection } from "@/lib/supabase/types";
 import type { ChatMessage, ChatMessageContent } from "@/lib/supabase/data";
+import type { WeatherData } from "@/lib/weather";
 import {
   loadChatMessages,
   saveChatMessage,
@@ -68,6 +69,7 @@ type ChatPanelProps = {
   } | null;
   aiAdditionalContext?: string;
   aiObservations?: Array<{ category: string; observation: string; dateRef: string }>;
+  weather?: WeatherData | null;
   onTasksChanged: () => void;
   onEventsChanged: () => void;
   onHabitSessionAdded: (session: HabitSession) => void;
@@ -121,6 +123,7 @@ export default function ChatPanel({
   identityProfile,
   aiAdditionalContext,
   aiObservations,
+  weather,
   onTasksChanged,
   onEventsChanged,
   onHabitSessionAdded,
@@ -197,10 +200,11 @@ export default function ChatPanel({
       identityProfile,
       aiAdditionalContext,
       aiObservations,
+      weather,
     });
   }, [
     todayKey, goals, tasks, completedTasks, events, habits, habitSessions,
-    identityMetrics, yesterdayIdentityMetrics, focus3, morningFlowStatus, latestReflection,
+    identityMetrics, yesterdayIdentityMetrics, focus3, morningFlowStatus, latestReflection, weather,
     identityProfile, aiAdditionalContext, aiObservations,
   ]);
 

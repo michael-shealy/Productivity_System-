@@ -9,6 +9,7 @@ import { useAIBriefing } from "@/lib/useAIBriefing";
 import { toDateKey, getWeekStartKey, getMonthKey, getYearKey } from "@/lib/date-utils";
 import { computeHabitStats } from "@/lib/habit-stats";
 import { apiFetch } from "@/lib/fetch-helpers";
+import type { WeatherData } from "@/lib/weather";
 import { createClient } from "@/lib/supabase/client";
 import {
   loadIdentityMetrics,
@@ -38,6 +39,7 @@ import {
   loadAllObservations,
   dismissObservation,
   undismissObservation,
+  saveDailyWeather,
 } from "@/lib/supabase/data";
 import type { WeeklyReflection, UserPreferences, IdentityProfile, AIObservation } from "@/lib/supabase/types";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
@@ -192,6 +194,14 @@ export default function Home() {
   const [selectedCalendarIds, setSelectedCalendarIds] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<DashboardTab>("practice");
   const [aiObservations, setAiObservations] = useState<AIObservation[]>([]);
+  const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [showLocationSetup, setShowLocationSetup] = useState(false);
+  const [locationSearchQuery, setLocationSearchQuery] = useState("");
+  const [locationSearchResults, setLocationSearchResults] = useState<
+    Array<{ name: string; latitude: number; longitude: number; country: string; admin1: string }>
+  >([]);
+  const [locationSearching, setLocationSearching] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [identityMetrics, setIdentityMetrics] = useState({
     morningGrounding: false,
@@ -374,6 +384,100 @@ export default function Home() {
     await supabase.auth.signOut();
     window.location.href = "/login";
   }, [supabase]);
+
+  // ── Weather ─────────────────────────────────────────────────────────
+  const fetchWeather = useCallback(async (lat: number, lng: number, name: string) => {
+    setWeatherLoading(true);
+    try {
+      const data = await apiFetch<WeatherData>(
+        `/api/weather?lat=${lat}&lng=${lng}&name=${encodeURIComponent(name)}`,
+        { label: "Weather" }
+      );
+      if (data) {
+        setWeatherData(data);
+        // Save today's weather to Supabase for observation pipeline
+        if (supabase && user && data.forecast[0]) {
+          const today = data.forecast[0];
+          saveDailyWeather(supabase, user.id, {
+            date: today.date,
+            tempHigh: today.tempHigh,
+            tempLow: today.tempLow,
+            condition: today.condition,
+            weatherCode: today.weatherCode,
+            precipChance: today.precipChance,
+            sunrise: today.sunrise,
+            sunset: today.sunset,
+          }).catch(() => {}); // non-blocking
+        }
+      }
+    } catch {
+      // Weather is non-critical — fail silently
+    } finally {
+      setWeatherLoading(false);
+    }
+  }, [supabase, user]);
+
+  const saveLocationAndFetchWeather = useCallback(async (
+    loc: { name: string; latitude: number; longitude: number }
+  ) => {
+    if (!supabase || !user) return;
+    const nextPrefs = { ...(userPreferences ?? {}), location: loc };
+    setUserPreferences(nextPrefs);
+    await saveUserPreferences(supabase, user.id, nextPrefs);
+    setShowLocationSetup(false);
+    setLocationSearchQuery("");
+    setLocationSearchResults([]);
+    fetchWeather(loc.latitude, loc.longitude, loc.name);
+  }, [supabase, user, userPreferences, fetchWeather]);
+
+  const handleUseMyLocation = useCallback(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        saveLocationAndFetchWeather({
+          name: "My Location",
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+        });
+      },
+      () => {} // silently ignore denial
+    );
+  }, [saveLocationAndFetchWeather]);
+
+  // Debounced city search
+  const locationSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (locationSearchQuery.trim().length < 2) {
+      setLocationSearchResults([]);
+      return;
+    }
+    if (locationSearchTimer.current) clearTimeout(locationSearchTimer.current);
+    locationSearchTimer.current = setTimeout(async () => {
+      setLocationSearching(true);
+      try {
+        const res = await apiFetch<{ results: Array<{ name: string; latitude: number; longitude: number; country: string; admin1: string }> }>(
+          `/api/weather/geocode?q=${encodeURIComponent(locationSearchQuery.trim())}`,
+          { label: "Geocode" }
+        );
+        setLocationSearchResults(res?.results ?? []);
+      } catch {
+        setLocationSearchResults([]);
+      } finally {
+        setLocationSearching(false);
+      }
+    }, 300);
+    return () => {
+      if (locationSearchTimer.current) clearTimeout(locationSearchTimer.current);
+    };
+  }, [locationSearchQuery]);
+
+  // Fetch weather on mount if location exists
+  useEffect(() => {
+    if (userPreferences?.location && !weatherData && !weatherLoading) {
+      const loc = userPreferences.location;
+      fetchWeather(loc.latitude, loc.longitude, loc.name);
+    }
+  }, [userPreferences?.location, weatherData, weatherLoading, fetchWeather]);
 
   const hasTodoist = todoistTasks.length > 0;
   const hasCalendar = calendarEvents.length > 0;
@@ -1281,10 +1385,9 @@ export default function Home() {
     [habits]
   );
 
-  // Last 7 days excluding today (complete days only for historic metrics)
   const last7Days = useMemo(() => {
     const days: string[] = [];
-    for (let i = 1; i <= 7; i += 1) {
+    for (let i = 6; i >= 0; i -= 1) {
       const date = new Date();
       date.setDate(date.getDate() - i);
       days.push(toDateKey(date));
@@ -1417,6 +1520,7 @@ export default function Home() {
     aiTone: "standard" as "standard" | "gentle",
     identityProfile: null as IdentityProfile | null,
     aiAdditionalContext: undefined as string | undefined,
+    weatherData: null as WeatherData | null,
   });
   focus3ContextRef.current = {
     todayKey,
@@ -1431,6 +1535,7 @@ export default function Home() {
     aiTone: userPreferences?.aiTone ?? "standard",
     identityProfile,
     aiAdditionalContext: userPreferences?.aiAdditionalContext,
+    weatherData,
   };
   const aiObservationsRef = useRef(aiObservations);
   aiObservationsRef.current = aiObservations;
@@ -1487,6 +1592,7 @@ export default function Home() {
         .filter((o) => !o.dismissed && !o.supersededBy && (o.category === "habit_trend" || o.category === "identity_pattern"))
         .slice(0, 3)
         .map((o) => ({ category: o.category, observation: o.observation })),
+      weather: ctx.weatherData,
     };
 
     fetch("/api/ai/focus3", {
@@ -1545,6 +1651,7 @@ export default function Home() {
       identityProfile: ipForAI,
       customIdentityLabels: userPreferences?.identityQuestions?.map((q) => q.label),
       aiAdditionalContext: userPreferences?.aiAdditionalContext,
+      weather: weatherData,
     });
   }, [
     userGoals,
@@ -1561,6 +1668,7 @@ export default function Home() {
     identityProfile,
     userPreferences?.identityQuestions,
     userPreferences?.aiAdditionalContext,
+    weatherData,
   ]);
 
   const aiBriefing = useAIBriefing(aiBriefingContext, supabase, user?.id ?? null);
@@ -2002,7 +2110,62 @@ export default function Home() {
           setChatOpen={setChatOpen}
           handleLogout={handleLogout}
           resetMorningFlow={resetMorningFlow}
+          weatherData={weatherData}
+          onChangeLocation={() => setShowLocationSetup(true)}
         />
+
+        {/* Location setup prompt — non-blocking, dismissible */}
+        {(showLocationSetup || (!userPreferences?.location && !weatherLoading && !authLoading)) && (
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-zinc-400">
+                {userPreferences?.location ? "Change your location for weather" : "Set your location for weather-aware suggestions"}
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowLocationSetup(false)}
+                className="text-xs text-zinc-600 hover:text-zinc-400"
+              >
+                Dismiss
+              </button>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleUseMyLocation}
+                className="rounded-full border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 hover:text-white"
+              >
+                Use my location
+              </button>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={locationSearchQuery}
+                  onChange={(e) => setLocationSearchQuery(e.target.value)}
+                  placeholder="Search city..."
+                  className="w-48 rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-indigo-600 focus:outline-none"
+                />
+                {locationSearching && (
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-500">...</span>
+                )}
+                {locationSearchResults.length > 0 && (
+                  <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-lg border border-zinc-700 bg-zinc-900 shadow-lg">
+                    {locationSearchResults.map((r, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => saveLocationAndFetchWeather({ name: r.name, latitude: r.latitude, longitude: r.longitude })}
+                        className="block w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+                      >
+                        {r.name}{r.admin1 ? `, ${r.admin1}` : ""}{r.country ? ` — ${r.country}` : ""}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {activeTab === "practice" && (
           <>
@@ -2775,6 +2938,8 @@ export default function Home() {
                     habit,
                     last7,
                     sumLast7,
+                    activeStreak,
+                    longestStreak,
                     adherenceLast365,
                     adherenceCurrentYear,
                     weekdayTotals,
@@ -2889,21 +3054,41 @@ export default function Home() {
                               <p>{adherenceCurrentYear}% {new Date().getFullYear()}</p>
                             </div>
                           </div>
-                          <div className="mt-3 flex items-center gap-1">
-                            {last7.map((value, index) => (
-                              <span
-                                key={`${habit.id}-day-${index}`}
-                                className={`h-2 w-6 rounded-full ${
-                              value > 0 ? habitStyle.bar : "bg-zinc-900/70"
-                                }`}
-                              />
-                            ))}
+                          <div className="mt-3 flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1">
+                                {last7.map((value, index) => (
+                                  <span
+                                    key={`${habit.id}-day-${index}`}
+                                    className={`h-2 w-6 rounded-full ${
+                                      value > 0 ? habitStyle.bar : "bg-zinc-900/70"
+                                    } ${index === 6 ? "ring-1 ring-amber-400/50" : ""}`}
+                                  />
+                                ))}
+                              </div>
+                              <p className="mt-1.5 text-[11px] text-amber-100/70">
+                                {habit.kind === "amount"
+                                  ? `${sumLast7} in last 7 days`
+                                  : `${sumLast7} check-ins`}
+                              </p>
+                            </div>
+                            <div className="flex items-start gap-3 shrink-0">
+                              <div className="flex flex-col items-center gap-1">
+                                <span className="text-[10px] text-amber-100/60">Streak</span>
+                                <span className={`flex h-9 w-9 items-center justify-center rounded-full border border-amber-700/40 bg-zinc-950/30 text-sm font-semibold text-amber-200`}>
+                                  {activeStreak}
+                                </span>
+                                <span className="text-[9px] text-amber-100/40">{isDaily ? "days" : "weeks"}</span>
+                              </div>
+                              <div className="flex flex-col items-center gap-1">
+                                <span className="text-[10px] text-amber-100/60">Best</span>
+                                <span className={`flex h-9 w-9 items-center justify-center rounded-full border border-amber-700/40 bg-zinc-950/30 text-sm font-semibold text-amber-200`}>
+                                  {longestStreak}
+                                </span>
+                                <span className="text-[9px] text-amber-100/40">{isDaily ? "days" : "weeks"}</span>
+                              </div>
+                            </div>
                           </div>
-                          <p className="mt-2 text-[11px] text-amber-100/70">
-                            {habit.kind === "amount"
-                              ? `${sumLast7} in last 7 days`
-                              : `${sumLast7} check-ins`}
-                          </p>
                         </button>
                         <div className={`mt-3 rounded-lg border bg-zinc-950/40 px-3 py-2 text-xs text-zinc-200 ${habitStyle.card}`}>
                           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -4172,6 +4357,7 @@ export default function Home() {
           } : undefined}
           aiAdditionalContext={userPreferences?.aiAdditionalContext}
           aiObservations={aiObservations.filter((o) => !o.dismissed && !o.supersededBy).slice(0, 8).map((o) => ({ category: o.category, observation: o.observation, dateRef: o.dateRef }))}
+          weather={weatherData}
           onTasksChanged={() => loadTodoist(true)}
           onEventsChanged={() => loadCalendar(true)}
           onHabitSessionAdded={(session) => setHabitSessions((prev) => [session, ...prev])}

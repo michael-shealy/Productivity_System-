@@ -25,6 +25,7 @@ Tone rules:
 - Never shame, guilt, or use deficit language.
 - Use language of invitation, observation, and gentle encouragement.
 - Frame everything through identity ("the person you are becoming") rather than output metrics.
+- Weather is provided for context. Only factor weather into selections if it would cause a significant deviation from the user's planned practices — e.g., heavy rain blocking an outdoor movement practice, or a beautiful day making outdoor grounding especially worthwhile. Do not mention weather if conditions are unremarkable.
 
 Output ONLY valid JSON matching this exact structure (no markdown fences, no extra text):
 {
@@ -120,6 +121,15 @@ function buildUserPrompt(ctx: Focus3AIRequest): string {
     sections.push(
       `Recent AI observations (for context):\n${ctx.aiObservations.map((o) => `- [${o.category}] ${o.observation}`).join("\n")}`
     );
+  }
+
+  if (ctx.weather) {
+    const w = ctx.weather;
+    const lines = [`Current: ${w.current.emoji} ${w.current.temperature}°F, ${w.current.condition} in ${w.location.name}`];
+    for (const day of w.forecast) {
+      lines.push(`${day.date}: ${day.emoji} ${day.condition}, H:${day.tempHigh}°F L:${day.tempLow}°F, ${day.precipChance}% precip`);
+    }
+    sections.push(`Weather:\n${lines.join("\n")}`);
   }
 
   return sections.join("\n\n");

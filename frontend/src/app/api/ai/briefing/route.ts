@@ -13,7 +13,8 @@ Your tone rules:
 - Be concise — headline ≤ 2 sentences, valuesFocus ≤ 1 sentence, each whyBullet ≤ 1 sentence.
 - Every suggestion must cite at least one piece of data from the context (a streak, a task, a habit stat, an event).
 - When you mention adherence percentages or completion rates, ALWAYS name the specific habit and the time window in the same sentence.
-- If you mention more than one percentage (for different habits or windows), explicitly map each number to its habit and window (e.g., "reading: 99% over the last 365 days; steps: 87% over the last 365 days this calendar year") instead of grouping unlabeled numbers together.`;
+- If you mention more than one percentage (for different habits or windows), explicitly map each number to its habit and window (e.g., "reading: 99% over the last 365 days; steps: 87% over the last 365 days this calendar year") instead of grouping unlabeled numbers together.
+- Weather is provided for context. Only mention weather if it would cause a significant deviation from the user's planned practices or schedule — e.g., heavy rain blocking an outdoor movement practice, extreme heat making a midday walk inadvisable, or a beautiful day making outdoor grounding especially worthwhile. Do not mention weather if conditions are unremarkable or have no material impact on the day's identity practices.`;
 
 const SYSTEM_PROMPT_GENTLE = `
 Additional tone (user chose "Gentle" mode): Use recovery-focused language. When habit adherence was low or the user reflected on difficulty, emphasize minimums and that no catch-up is needed. Optionally cite their reflection: "Last week you reflected that …" where relevant. Never guilt or deficit language.`;
@@ -127,6 +128,15 @@ function buildUserPrompt(ctx: AIBriefingRequest, observations?: Array<{ category
 
   if (ctx.aiAdditionalContext) {
     sections.push(`Additional user context: ${ctx.aiAdditionalContext}`);
+  }
+
+  if (ctx.weather) {
+    const w = ctx.weather;
+    const lines = [`Current: ${w.current.emoji} ${w.current.temperature}°F, ${w.current.condition} in ${w.location.name}`];
+    for (const day of w.forecast) {
+      lines.push(`${day.date}: ${day.emoji} ${day.condition}, H:${day.tempHigh}°F L:${day.tempLow}°F, ${day.precipChance}% precip, sunrise ${day.sunrise}, sunset ${day.sunset}`);
+    }
+    sections.push(`Weather (3-day forecast):\n${lines.join("\n")}`);
   }
 
   if (observations && observations.length > 0) {
