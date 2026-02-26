@@ -277,6 +277,7 @@ export default function Home() {
   // Debounce timers for Supabase saves
   const identitySaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const morningFlowSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const morningFlowLoaded = useRef(false);
   const identityMetricsCache = useRef<Record<string, {
     morningGrounding: boolean;
     embodiedMovement: boolean;
@@ -356,6 +357,7 @@ export default function Home() {
         setMorningFlowStatus(flowData.status);
         setMorningFlowSteps(flowData.steps);
       }
+      morningFlowLoaded.current = true;
       if (focus3Data?.items?.length) {
         f3d({ type: "LOAD_FROM_DB", items: focus3Data.items, reasoning: focus3Data.aiReasoning ?? "" });
       }
@@ -793,7 +795,7 @@ export default function Home() {
 
   // Debounced save: morning flow status + steps → Supabase
   useEffect(() => {
-    if (!user || !supabase) return;
+    if (!user || !supabase || !morningFlowLoaded.current) return;
     if (morningFlowSaveTimer.current) clearTimeout(morningFlowSaveTimer.current);
     morningFlowSaveTimer.current = setTimeout(() => {
       saveMorningFlow(supabase, user.id, todayKey, {
